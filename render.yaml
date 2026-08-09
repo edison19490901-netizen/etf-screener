@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: etf-screener
+    runtime: python
+    buildCommand: pip install -r etf-screener/requirements.txt
+    startCommand: python etf-screener/app.py
+    envVars:
+      - key: PORT
+        value: "8080"
