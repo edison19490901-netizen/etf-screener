@@ -84,6 +84,7 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 <button class="btn btn-view" onclick="V.switch('table')">📋 Table</button>
 <button class="btn btn-refresh btn-quick" id="btnQ" onclick="U(true,'quick')">⚡ Quick Refresh</button>
 <button class="btn btn-refresh btn-full" id="btnF" onclick="U(true,'full')">🔄 Full Refresh</button>
+<button class="btn btn-refresh" id="btnX" onclick="exportExcel()" style="background:#059669">📥 Export Excel</button>
 <input class="search-box" id="q" placeholder="Search..." oninput="R()">
 <select class="sort-select" id="sort" onchange="R()">
 <option value="discount">折价率↓</option>
@@ -500,6 +501,26 @@ async function U(force, mode){
   }else{
     btnQ.textContent='⚡ Quick Refresh';
   }
+}
+
+// ════════════════════  Export Excel  ════════════════════
+function exportExcel(){
+  var base = D._detectApi();
+  var btn = document.getElementById('btnX');
+  btn.textContent = '⏳ Exporting...';
+  btn.disabled = true;
+  // Create a hidden download link
+  var link = document.createElement('a');
+  link.href = base + '/api/export';
+  link.download = '';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(function(){
+    btn.textContent = '📥 Export Excel';
+    btn.disabled = false;
+    toast('✅ Excel downloaded','ok');
+  }, 2000);
 }
 
 // ════════════════════  Toast  ════════════════════

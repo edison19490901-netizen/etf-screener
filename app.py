@@ -4,11 +4,13 @@ Start: python app.py
 Serves ETF dashboard + /api/etf_data endpoint
 Data sources: akshare (spot/fee/PE) + baostock (K-line history)
 """
-import json, os, sys, time, threading
+import json, os, sys, time, threading, re
 from datetime import datetime, timedelta, timezone
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+import urllib.request
 
 import pandas as pd
 import numpy as np
@@ -557,6 +559,60 @@ def get_data(force_refresh=False, full=False):
             _fetching = False
 
 
+# ── PushPlus Notification ───────────────────────────────────────
+
+def send_pushplus(token: str, title: str, content: str, template: str = 'html') -> bool:
+    """Send push notification via PushPlus WeChat."""
+    url = 'http://www.pushplus.plus/send'
+    data = json.dumps({
+        'token': token,
+        'title': title,
+        'content': content,
+        'template': template,
+    }).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read().decode())
+            return result.get('code') == 200
+    except Exception as e:
+        print(f'[{bj_now():%H:%M:%S}] PushPlus error: {e}')
+        return False
+
+
+def build_push_html(etfs) -> str:
+    """Build compact HTML table for WeChat push."""
+    now_str = bj_now().strftime('%Y-%m-%d %H:%M')
+    rows = ''
+    for e in etfs:
+        code = e.get('code', '-')
+        name = e.get('name', code)
+        price = e.get('latest_price', 0)
+        discount = e.get('discount_rate', 0)
+        pe_pct = e.get('pe_percentile')
+        pe_str = f'{pe_pct:.1f}%' if pe_pct is not None else '--'
+        pct_low = e.get('pct_from_low')
+        low_str = f'{pct_low:.1f}%' if pct_low is not None else '--'
+        d_color = '#059669' if discount < -0.3 else '#dc2626' if discount > 0.3 else '#64748b'
+        rows += (
+            f'<tr>'
+            f'<td style="text-align:left">{name}<br><span style="font-size:10px;color:#8892b0">{code}</span></td>'
+            f'<td style="font-weight:600">{price:.3f}</td>'
+            f'<td style="color:{d_color};font-weight:600">{discount:+.2f}%</td>'
+            f'<td>{low_str}</td><td>{pe_str}</td>'
+            f'</tr>'
+        )
+    return (
+        f'<!DOCTYPE html><html><head><meta charset="UTF-8"></head>'
+        f'<body style="font-family:sans-serif;padding:8px;background:#fff">'
+        f'<h3>ETF Screener Report</h3>'
+        f'<p style="color:#64748b;font-size:12px">{now_str} | {len(etfs)} ETFs</p>'
+        f'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+        f'<tr style="background:#f1f5f9"><th>Name</th><th>Price</th><th>Discount</th><th>1Y Low%</th><th>PE%</th></tr>'
+        f'{rows}</table></body></html>'
+    )
+
+
 # ── HTTP Handler ─────────────────────────────────────────────────
 
 class ETFHandler(SimpleHTTPRequestHandler):
@@ -586,21 +642,38 @@ class ETFHandler(SimpleHTTPRequestHandler):
             })
             return
 
+        # ── API: Export Excel ─────────────────────────────────
+        if path == '/api/export':
+            data = get_data(force_refresh=False, full=False)
+            self._export_excel(data)
+            return
+
         # ── API: Refresh data ─────────────────────────────────
         if path == '/api/refresh':
             # Default: full refresh (akshare+baostock, ~130s). Use ?quick=1 for fast mode (~3s).
             quick = qs.get('quick', ['0'])[0] == '1'
             async_mode = qs.get('async', ['0'])[0] == '1'
+            push_token = os.getenv('PUSHPLUS_TOKEN', '')
+
+            def do_refresh():
+                data = get_data(force_refresh=True, full=not quick)
+                # PushPlus notification after full refresh
+                if not quick and data and push_token:
+                    try:
+                        html = build_push_html(data)
+                        ok = send_pushplus(push_token, f'ETF Screener ({len(data)} ETFs)', html)
+                        print(f'[{bj_now():%H:%M:%S}] PushPlus: {"OK" if ok else "FAIL"}')
+                    except Exception as ex:
+                        print(f'[{bj_now():%H:%M:%S}] PushPlus error: {ex}')
+                return data
+
             if async_mode:
-                t = threading.Thread(
-                    target=lambda: get_data(force_refresh=True, full=not quick),
-                    daemon=True
-                )
+                t = threading.Thread(target=do_refresh, daemon=True)
                 t.start()
-                mode = 'quick (~3s)' if quick else 'full (~130s)'
+                mode = 'quick (~3s)' if quick else 'full (~130s) + PushPlus'
                 self._json_response({'status': 'ok', 'msg': f'Refresh started: {mode}'})
             else:
-                data = get_data(force_refresh=True, full=not quick)
+                data = do_refresh()
                 self._json_response({
                     'status': 'ok',
                     'count': len(data) if data else 0,
@@ -630,6 +703,50 @@ class ETFHandler(SimpleHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Cache-Control', 'no-cache')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _export_excel(self, data):
+        """Generate and serve Excel file from ETF data."""
+        if not data:
+            self._json_response({'error': 'No data available'})
+            return
+        rows = []
+        for e in data:
+            rows.append({
+                '代码': e.get('code', ''),
+                '名称': e.get('name', ''),
+                '最新价': e.get('latest_price', 0),
+                '折溢价(%)': e.get('discount_rate', 0),
+                '涨跌幅(%)': e.get('change_pct', 0),
+                '规模(亿)': e.get('fund_size_yi', 0),
+                '费率': e.get('total_fee') or e.get('mgmt_fee', '--'),
+                'PE分位(%)': e.get('pe_percentile'),
+                'PE当前': e.get('pe_current'),
+                '距1Y低点(%)': e.get('pct_from_low'),
+                '1Y最低': e.get('min_price_1y'),
+                'BB上轨': e.get('bb_upper'),
+                'BB下轨': e.get('bb_lower'),
+                '换手率(%)': e.get('turnover_rate', 0),
+            })
+        df = pd.DataFrame(rows)
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='ETFs', index=False)
+            # Auto-adjust column widths
+            ws = writer.sheets['ETFs']
+            for col_idx, col_name in enumerate(df.columns, 1):
+                max_len = max(
+                    df[col_name].astype(str).str.len().max(),
+                    len(str(col_name))
+                )
+                ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 4, 40)
+        body = output.getvalue()
+        filename = f'etf_screener_{bj_now().strftime("%Y%m%d_%H%M")}.xlsx'
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
