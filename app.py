@@ -45,6 +45,7 @@ except ImportError:
 
 # ── ETF List ─────────────────────────────────────────────────────
 ETF_LIST = [
+    # 攻击仓 — 行业ETF
     '516080',  # 创新药ETF易方达
     '159061',  # 绿色电力ETF南方
     '159611',  # 电力ETF广发
@@ -59,7 +60,19 @@ ETF_LIST = [
     '510300',  # 沪深300ETF华泰柏瑞
     '515880',  # 通信ETF国泰
     '588780',  # 科创芯片设计ETF国联安
+    # 对冲仓 — 防御/避险
+    '518880',  # 黄金ETF华安
+    '511260',  # 十年国债ETF国泰
+    '512890',  # 红利低波ETF华泰柏瑞
 ]
+BENCHMARK_ETF = '510300'  # 对冲基准：沪深300
+
+# Fallback names for ETFs not covered by akshare spot data
+ETF_NAMES = {
+    '518880': '黄金ETF华安',
+    '511260': '十年国债ETF国泰',
+    '512890': '红利低波ETF华泰柏瑞',
+}
 
 # ETF → underlying index mapping for PE percentile
 # stock_index_pe_lg uses Chinese names: 上证50, 沪深300, 中证500, 创业板50, 中证红利, etc.
@@ -158,6 +171,25 @@ def fetch_all_data(progress_cb=None):
             'pe_percentile': None,
             'pe_current': None,
         })
+
+    # Add any ETFs missing from spot data (e.g. bond/gold ETFs that akshare may skip)
+    existing_codes = {r['code'] for r in results}
+    for code in ETF_LIST:
+        if code not in existing_codes:
+            results.append({
+                'code': code,
+                'name': ETF_NAMES.get(code, code),
+                'latest_price': 0, 'iopv': None, 'discount_rate': 0,
+                'change_pct': 0, 'volume': 0, 'turnover': 0,
+                'high': 0, 'low': 0, 'prev_close': 0, 'amplitude': 0,
+                'turnover_rate': 0, 'fund_size': 0, 'fund_size_yi': 0,
+                'update_time': '', 'data_date': '',
+                'price_history': None, 'min_price_1y': None,
+                'pct_from_low': None, 'bb_lower': None,
+                'pct_from_bb_low': None,
+                'mgmt_fee': None, 'custody_fee': None, 'total_fee': None,
+                'pe_percentile': None, 'pe_current': None,
+            })
 
     # ── Step 2: K-line history via baostock ──────────────────────
     end_date = bj_now().strftime('%Y-%m-%d')
@@ -331,9 +363,38 @@ def fetch_all_data(progress_cb=None):
             etf.update(pe_data[idx_name])
 
     log(f'Done: {len(results)} ETFs fetched')
+    # Calculate correlations with benchmark
+    calc_correlations(results)
     # Save metadata cache for fast mode
     save_metadata(results)
     return results
+
+
+def calc_correlations(etfs):
+    """Calculate 60-day correlation of each ETF with the benchmark (510300)."""
+    benchmark = None
+    price_map = {}  # code → closes array
+    for e in etfs:
+        ph = e.get('price_history')
+        if ph and len(ph) >= 20:
+            price_map[e['code']] = pd.Series(ph)
+    if BENCHMARK_ETF not in price_map:
+        return
+    bench_returns = price_map[BENCHMARK_ETF].pct_change().dropna()
+    for e in etfs:
+        e['corr_300'] = None
+        if e['code'] == BENCHMARK_ETF:
+            e['corr_300'] = 1.0
+            continue
+        prices = price_map.get(e['code'])
+        if prices is not None and len(prices) >= 20:
+            rets = prices.pct_change().dropna()
+            # Align lengths to the shorter series
+            min_len = min(len(rets), len(bench_returns))
+            if min_len >= 10:
+                r = rets.iloc[-min_len:].corr(bench_returns.iloc[-min_len:])
+                if pd.notna(r):
+                    e['corr_300'] = round(float(r), 3)
 
 
 def save_metadata(etfs):
@@ -344,6 +405,7 @@ def save_metadata(etfs):
             'name': e.get('name', ''),
             'fund_size': e.get('fund_size', 0),
             'fund_size_yi': e.get('fund_size_yi', 0),
+            'corr_300': e.get('corr_300'),
             'mgmt_fee': e.get('mgmt_fee'),
             'custody_fee': e.get('custody_fee'),
             'total_fee': e.get('total_fee'),
@@ -401,7 +463,7 @@ def fetch_prices_quick(progress_cb=None):
         bs_code = ('sh.' if code.startswith('5') else 'sz.') + code
         etf = {
             'code': code,
-            'name': etf_meta.get('name', code),
+            'name': etf_meta.get('name') or ETF_NAMES.get(code, code),
             'latest_price': 0,
             'price_history': None,
             'min_price_1y': None,
@@ -425,6 +487,7 @@ def fetch_prices_quick(progress_cb=None):
             'iopv': etf_meta.get('iopv'),
             'update_time': etf_meta.get('update_time', ''),
             'data_date': etf_meta.get('data_date', ''),
+            'corr_300': etf_meta.get('corr_300'),
         }
         try:
             rs = bs.query_history_k_data_plus(
@@ -479,6 +542,7 @@ def fetch_prices_quick(progress_cb=None):
     except Exception:
         pass
 
+    calc_correlations(results)
     log(f'Quick refresh done: {len(results)} ETFs')
     return results
 

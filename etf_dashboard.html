@@ -107,7 +107,7 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 <div class="grid-view active" id="gv"></div>
 <div class="table-view" id="tv">
 <table><thead><tr>
-<th>#</th><th>名称/代码</th><th>最新价</th><th>折溢价</th><th>涨跌幅</th><th>规模(亿)</th><th>费率</th><th>PE分位</th><th>距1Y低点</th><th>距BB下轨</th><th>换手率</th>
+<th>#</th><th>名称/代码</th><th>最新价</th><th>折溢价</th><th>涨跌幅</th><th>规模(亿)</th><th>费率</th><th>PE分位</th><th>vs沪深300</th><th>距1Y低点</th><th>距BB下轨</th><th>换手率</th>
 </tr></thead><tbody id="tb"></tbody></table></div>
 
 <div id="empty" style="display:none;text-align:center;padding:60px;color:var(--muted)"><div style="font-size:3rem;margin-bottom:16px">📭</div><p>No data loaded. Click Quick Refresh or Full Refresh to load data.</p></div>
@@ -339,6 +339,7 @@ function R(){
 function discountClass(v){return v<-0.3?'green':v>0.3?'red':'';}
 function pctClass(v){if(v==null)return'';return v<=5?'lo':v<=15?'mi':'hi';}
 function peClass(v){if(v==null)return'';return v<=30?'lo':v<=70?'mi':'hi';}
+function corrClass(v){if(v==null)return'';if(v<0)return'lo';return v<=0.3?'mi':v<=0.7?'':'hi';}
 
 function renderGrid(arr){
   var h='';
@@ -360,6 +361,8 @@ function renderGrid(arr){
     h+='<div class="card-m"><span class="cml">涨跌幅</span><span class="cmv '+chgCl+'">'+(e.change_pct>0?'+':'')+e.change_pct.toFixed(2)+'%</span></div>';
     h+='<div class="card-m"><span class="cml">费率</span><span class="cmv">'+feeStr+'</span></div>';
     h+='<div class="card-m"><span class="cml">换手率</span><span class="cmv">'+(e.turnover_rate||0).toFixed(1)+'%</span></div>';
+    var crCl=corrClass(e.corr_300);
+    h+='<div class="card-m"><span class="cml">vs沪深300</span><span class="cmv '+crCl+'">'+(e.corr_300!=null?(e.corr_300>0?'+':'')+e.corr_300.toFixed(2):'--')+'</span></div>';
     if(e.pe_percentile!=null){
       h+='<div class="card-m"><span class="cml">PE分位(3Y)</span><span class="cmv '+peCl+'">'+e.pe_percentile.toFixed(1)+'%</span></div>';
     }else{
@@ -391,7 +394,7 @@ function renderTable(arr){
     var e=arr[i];
     var dColor=discountClass(e.discount_rate);
     var pLow=pctClass(e.pct_from_low), pBB=pctClass(e.pct_from_bb_low);
-    var peCl=peClass(e.pe_percentile);
+    var peCl=peClass(e.pe_percentile), crCl=corrClass(e.corr_300);
     var chgCl=e.change_pct>=0?'green':'red';
     h+='<tr onclick="window.open(\'https://quote.eastmoney.com/etf/'+e.code+'.html\',\'_blank\')">';
     h+='<td>'+(i+1)+'</td>';
@@ -402,6 +405,7 @@ function renderTable(arr){
     h+='<td>'+(e.fund_size_yi||'--')+'</td>';
     h+='<td>'+(e.total_fee||e.mgmt_fee||'--')+'</td>';
     h+='<td class="t-pe '+peCl+'">'+(e.pe_percentile!=null?e.pe_percentile.toFixed(1)+'%':'--')+'</td>';
+    h+='<td class="t-pct '+crCl+'">'+(e.corr_300!=null?(e.corr_300>0?'+':'')+e.corr_300.toFixed(2):'--')+'</td>';
     h+='<td class="t-pct '+pLow+'">'+(e.pct_from_low!=null?e.pct_from_low.toFixed(1)+'%':'--')+'</td>';
     h+='<td class="t-pct '+pBB+'">'+(e.pct_from_bb_low!=null?e.pct_from_bb_low.toFixed(1)+'%':'--')+'</td>';
     h+='<td>'+(e.turnover_rate||0).toFixed(1)+'%</td>';
