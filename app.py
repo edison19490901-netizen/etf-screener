@@ -72,6 +72,21 @@ ETF_INDEX_MAP = {
 
 # ── Data Fetching ────────────────────────────────────────────────
 
+def safe_float(val, default=0.0):
+    """Convert value to float, handling NaN."""
+    try:
+        return float(val) if pd.notna(val) else default
+    except (ValueError, TypeError):
+        return default
+
+def safe_int(val, default=0):
+    """Convert value to int, handling NaN."""
+    try:
+        return int(float(val)) if pd.notna(val) else default
+    except (ValueError, TypeError):
+        return default
+
+
 def calc_bollinger(closes, period=20, std_mult=2):
     """Calculate Bollinger Bands. Returns (middle, upper, lower) arrays."""
     if len(closes) < period:
@@ -112,21 +127,21 @@ def fetch_all_data(progress_cb=None):
     # Build base results from spot data
     for _, row in df_spot.iterrows():
         code = str(row['代码'])
-        fund_size = row.get('流通市值', 0) or 0
+        fund_size = safe_float(row.get('流通市值'), 0)
         results.append({
             'code': code,
             'name': str(row.get('名称', '')),
-            'latest_price': float(row.get('最新价', 0)),
-            'iopv': float(row.get('IOPV实时估值', 0)) if pd.notna(row.get('IOPV实时估值')) else None,
-            'discount_rate': float(row.get('基金折价率', 0)) if pd.notna(row.get('基金折价率')) else 0,
-            'change_pct': float(row.get('涨跌幅', 0)) if pd.notna(row.get('涨跌幅')) else 0,
-            'volume': int(row.get('成交量', 0) or 0),
-            'turnover': float(row.get('成交额', 0) or 0),
-            'high': float(row.get('最高价', 0)),
-            'low': float(row.get('最低价', 0)),
-            'prev_close': float(row.get('昨收', 0)),
-            'amplitude': float(row.get('振幅', 0)) if pd.notna(row.get('振幅')) else 0,
-            'turnover_rate': float(row.get('换手率', 0)) if pd.notna(row.get('换手率')) else 0,
+            'latest_price': safe_float(row.get('最新价'), 0),
+            'iopv': safe_float(row.get('IOPV实时估值'), None) if pd.notna(row.get('IOPV实时估值')) else None,
+            'discount_rate': safe_float(row.get('基金折价率'), 0),
+            'change_pct': safe_float(row.get('涨跌幅'), 0),
+            'volume': safe_int(row.get('成交量'), 0),
+            'turnover': safe_float(row.get('成交额'), 0),
+            'high': safe_float(row.get('最高价'), 0),
+            'low': safe_float(row.get('最低价'), 0),
+            'prev_close': safe_float(row.get('昨收'), 0),
+            'amplitude': safe_float(row.get('振幅'), 0),
+            'turnover_rate': safe_float(row.get('换手率'), 0),
             'fund_size': int(fund_size),
             'fund_size_yi': round(fund_size / 1e8, 2),  # 亿元
             'update_time': str(row.get('更新时间', '')),
