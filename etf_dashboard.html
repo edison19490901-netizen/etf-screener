@@ -32,17 +32,22 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 .etf-card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;cursor:pointer;transition:.25s}
 .etf-card:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,.3);border-color:var(--accent)}
 .etf-card.discount{border-left:3px solid var(--green)}.etf-card.premium{border-left:3px solid var(--red)}.etf-card.neutral{border-left:3px solid var(--muted)}
-.card-header{padding:10px 16px 4px;display:grid;grid-template-columns:1fr 1fr;align-items:center}
-.card-name{font-weight:600;font-size:.95rem}.card-code{font-size:.68rem;color:var(--muted);font-family:monospace;background:rgba(255,255,255,.04);padding:2px 8px;border-radius:5px;text-align:right;justify-self:end}
+.card-header{padding:10px 16px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--border)}
+.card-title{display:flex;flex-direction:column;gap:2px;min-width:0}
+.card-name{font-weight:600;font-size:.95rem}
+.card-code{font-size:.68rem;color:var(--muted);font-family:monospace;background:rgba(255,255,255,.04);padding:2px 8px;border-radius:5px;align-self:flex-start}
+.card-latest{display:flex;flex-direction:column;align-items:flex-end;gap:1px;flex-shrink:0}
 .card-body{padding:4px 16px 8px;display:grid;grid-template-columns:1fr 1fr;gap:4px 12px}
 .card-m{display:flex;flex-direction:column;gap:1px}
 .card-m:nth-child(odd){text-align:left}
 .card-m:nth-child(even){text-align:right}
+.card-m.right{text-align:right}
+.card-m.full{grid-column:1/-1;text-align:right}
 .cml{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
 .cmv{font-size:.9rem;font-weight:600;font-family:monospace}
 .cmv.green{color:var(--green)}.cmv.red{color:var(--red)}.cmv.yellow{color:var(--yellow)}
 .card-chart{padding:4px 16px 8px;display:flex;align-items:center;gap:6px}
-.card-chart canvas{width:100%;height:80px;border-radius:4px}
+.card-chart canvas{width:100%;height:160px;border-radius:4px}
 .card-chart .chart-fallback{flex:1;display:flex;align-items:center;gap:7px;font-size:.7rem;color:var(--muted)}
 .card-chart .bar-bg{flex:1;height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden}
 .card-chart .bar-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--green));transition:width .6s}
@@ -58,6 +63,10 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 .t-discount{font-weight:600}.t-discount.green{color:var(--green)}.t-discount.red{color:var(--red)}
 .t-pe{font-weight:600}.t-pe.lo{color:var(--green)}.t-pe.mi{color:var(--yellow)}.t-pe.hi{color:var(--red)}
 .t-pct{font-weight:600}.t-pct.lo{color:var(--green)}.t-pct.mi{color:var(--yellow)}.t-pct.hi{color:var(--red)}
+.zone-pill{display:inline-block;padding:2px 8px;border-radius:6px;font-weight:700;font-size:.72rem;color:#0a0e27;line-height:1.3}
+.zone-pill.z1{background:var(--green)}.zone-pill.z2{background:#4ade80}.zone-pill.z3{background:var(--yellow)}.zone-pill.z4{background:#fb923c;color:#0a0e27}.zone-pill.z5{background:var(--red);color:#fff}.zone-pill.z6{background:#9333ea;color:#fff}
+.t-floor{background:rgba(99,102,241,.16);font-weight:700;color:#c7d2fe}
+.zone-amt{color:var(--muted);font-size:.68rem;white-space:nowrap}
 
 .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:10px;font-size:.88rem;z-index:100;opacity:0;pointer-events:none;transition:opacity .3s}
 .toast.show{opacity:1}.toast.ok{background:rgba(34,197,94,.2);color:var(--green);border:1px solid rgba(34,197,94,.3)}
@@ -72,7 +81,7 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 
 <div class="header">
 <h1>ETF Screener — Real-time Tracking</h1>
-<div class="sub">14 ETFs | Quick Refresh (~3s) | Full Refresh (~130s) | K-line Charts | PE Percentile</div>
+<div class="sub">18 ETFs | Quick Refresh (~3s) | Full Refresh (~130s) | K-line Charts | PE Percentile | 网格</div>
 </div>
 
 <div class="info-bar">
@@ -85,7 +94,16 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 <button class="btn btn-refresh btn-quick" id="btnQ" onclick="U(true,'quick')">⚡ Quick Refresh</button>
 <button class="btn btn-refresh btn-full" id="btnF" onclick="U(true,'full')">🔄 Full Refresh</button>
 <button class="btn btn-refresh" id="btnX" onclick="exportExcel()" style="background:#059669">📥 Export Excel</button>
-<input class="search-box" id="q" placeholder="Search..." oninput="R()">
+<button class="btn btn-refresh" id="btnP" onclick="pushPlus()" style="background:#eab308;color:#0a0e27">🔔 PushPlus</button>
+<select class="sort-select" id="zone" onchange="R()">
+<option value="">全部区域</option>
+<option value="1">1区</option>
+<option value="2">2区</option>
+<option value="3">3区</option>
+<option value="4">4区</option>
+<option value="5">5区</option>
+<option value="6">6区</option>
+</select>
 <select class="sort-select" id="sort" onchange="R()">
 <option value="discount">折价率↓</option>
 <option value="discount_asc">折价率↑</option>
@@ -97,17 +115,19 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 <option value="pct_low">距1Y低点↓</option>
 <option value="pct_low_asc">距1Y低点↑</option>
 </select>
+<input class="search-box" id="budget" placeholder="网格预算/只(元)" value="10000" oninput="localStorage.setItem('etf_budget',this.value);R()" style="width:150px" title="每只ETF的网格总预算，1-5区各2份、6区不操作，共10份">
+<input class="search-box" id="q" placeholder="Search..." oninput="R()">
 </div>
 
 <div class="source-bar">
-<span style="font-size:.73rem;color:var(--muted)">折价=便宜买 · 溢价=贵买 | PE分位越低估值越低 | 绿色=折价/低估 红色=溢价/高估</span>
+<span style="font-size:.73rem;color:var(--muted)">1Y低/高为近一年高低 · 0.25/0.382/0.5/0.618/0.75为斐波那契网格线 · 区域1-6由低到高 · 1-5区各2份、6区不操作</span>
 <span class="result-count" id="rc">--</span>
 </div>
 
 <div class="grid-view active" id="gv"></div>
 <div class="table-view" id="tv">
 <table><thead><tr>
-<th>#</th><th>名称/代码</th><th>最新价</th><th>折溢价</th><th>涨跌幅</th><th>规模(亿)</th><th>费率</th><th>PE分位</th><th>vs沪深300</th><th>距1Y低点</th><th>距BB下轨</th><th>换手率</th>
+<th>#</th><th>Name</th><th>Latest</th><th>1Y Low</th><th>1Y High</th><th>0.25</th><th>0.382</th><th>0.5</th><th>0.618</th><th>0.75</th><th>Zone</th><th>Invest</th><th>Fee</th><th>Size</th><th>Turnover</th><th>vs CSI300</th><th>PE%</th><th>From Low</th><th>From BB</th>
 </tr></thead><tbody id="tb"></tbody></table></div>
 
 <div id="empty" style="display:none;text-align:center;padding:60px;color:var(--muted)"><div style="font-size:3rem;margin-bottom:16px">📭</div><p>No data loaded. Click Quick Refresh or Full Refresh to load data.</p></div>
@@ -206,7 +226,7 @@ function drawChart(canvas, etf){
   var closes = etf.price_history;
   if(!closes || closes.length<10) return;
 
-  var W=canvas.parentElement.clientWidth-32, H=80;
+  var W=canvas.parentElement.clientWidth-32, H=160;
   canvas.width=W*devicePixelRatio; canvas.height=H*devicePixelRatio;
   canvas.style.width=W+'px'; canvas.style.height=H+'px';
   var ctx=canvas.getContext('2d');
@@ -225,10 +245,20 @@ function drawChart(canvas, etf){
     if(bbMax>max) max=bbMax;
   }
   if(etf.min_price_1y && etf.min_price_1y<min) min=etf.min_price_1y;
+  if(etf.max_price_1y && etf.max_price_1y>max) max=etf.max_price_1y;
   var range=max-min||1, pad=range*0.05;
   min-=pad; max+=pad; range=max-min;
 
   var n=closes.length, stepX=W/(n-1);
+
+  // Fill current grid zone band (light)
+  var zBand=zoneBand(etf);
+  if(zBand){
+    var zyTop=H-((zBand.hi-min)/range)*H;
+    var zyBot=H-((zBand.lo-min)/range)*H;
+    ctx.fillStyle='rgba(234,179,8,.14)';
+    ctx.fillRect(0, zyTop, W, Math.max(0, zyBot-zyTop));
+  }
 
   // Determine color: green if price rose, red if fell
   var first=closes[0], last=closes[closes.length-1];
@@ -255,17 +285,15 @@ function drawChart(canvas, etf){
   }
   ctx.strokeStyle=color; ctx.lineWidth=1.8; ctx.stroke();
 
-  // BB lower band curve (if full history available)
+  // BB lower band curve (right-aligned to the last N closes)
   if(etf.bb_lower_history && etf.bb_lower_history.length>1){
     var bbHist = etf.bb_lower_history;
-    // Align BB curve to the right edge (last N closes)
-    var bbN = Math.min(bbHist.length, n);
-    var bbStepX = W/(bbN-1);
-    var bbOffset = W - (bbN-1)*bbStepX; // start offset if BB is shorter than price
+    var stepX2 = W/(n-1);                // same spacing as the price curve
+    var bbStartIdx = n - bbHist.length;  // right-align: BB covers the last bbHist closes
     ctx.beginPath();
     ctx.setLineDash([4,3]);
-    for(var j=0;j<bbN;j++){
-      var bx=bbOffset + j*bbStepX, by=H-((bbHist[j]-min)/range)*H;
+    for(var j=0;j<bbHist.length;j++){
+      var bx=(bbStartIdx+j)*stepX2, by=H-((bbHist[j]-min)/range)*H;
       if(j===0) ctx.moveTo(bx,by); else ctx.lineTo(bx,by);
     }
     ctx.strokeStyle='rgba(234,179,8,.6)'; ctx.lineWidth=1.2; ctx.stroke();
@@ -282,16 +310,15 @@ function drawChart(canvas, etf){
     }
   }
 
-  // BB upper band curve
+  // BB upper band curve (right-aligned to the last N closes)
   if(etf.bb_upper_history && etf.bb_upper_history.length>1){
     var ubHist = etf.bb_upper_history;
-    var ubN = Math.min(ubHist.length, n);
-    var ubStepX = W/(ubN-1);
-    var ubOffset = W - (ubN-1)*ubStepX;
+    var stepX3 = W/(n-1);
+    var ubStartIdx = n - ubHist.length;
     ctx.beginPath();
     ctx.setLineDash([4,3]);
-    for(var k=0;k<ubN;k++){
-      var ux=ubOffset + k*ubStepX, uy=H-((ubHist[k]-min)/range)*H;
+    for(var k=0;k<ubHist.length;k++){
+      var ux=(ubStartIdx+k)*stepX3, uy=H-((ubHist[k]-min)/range)*H;
       if(k===0) ctx.moveTo(ux,uy); else ctx.lineTo(ux,uy);
     }
     ctx.strokeStyle='rgba(234,179,8,.6)'; ctx.lineWidth=1.2; ctx.stroke();
@@ -307,19 +334,42 @@ function drawChart(canvas, etf){
     }
   }
 
-  // 1Y low (dashed cyan + label)
+  // 1Y low (dashed cyan, highlighted)
   if(etf.min_price_1y){
     var lowY=H-((etf.min_price_1y-min)/range)*H;
     if(lowY>0 && lowY<H){
       ctx.beginPath();
       ctx.setLineDash([2,6]);
       ctx.moveTo(0,lowY); ctx.lineTo(W,lowY);
-      ctx.strokeStyle='rgba(6,182,212,.6)'; ctx.lineWidth=1; ctx.stroke();
+      ctx.strokeStyle='rgba(6,182,212,.95)'; ctx.lineWidth=1.5; ctx.stroke();
       ctx.setLineDash([]);
-      // Label
-      ctx.fillStyle='rgba(6,182,212,.85)';
-      ctx.font='9px monospace';
-      ctx.fillText(etf.min_price_1y.toFixed(2), 2, lowY-3);
+    }
+  }
+
+  // 1Y high (dashed cyan, highlighted)
+  if(etf.max_price_1y){
+    var hiY=H-((etf.max_price_1y-min)/range)*H;
+    if(hiY>0 && hiY<H){
+      ctx.beginPath();
+      ctx.setLineDash([2,6]);
+      ctx.moveTo(0,hiY); ctx.lineTo(W,hiY);
+      ctx.strokeStyle='rgba(6,182,212,.95)'; ctx.lineWidth=1.5; ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // Fibonacci grid lines (0.25 / 0.382 / 0.5 / 0.618 / 0.75) — lines only, no price labels
+  var gridDefs=[['grid_25','rgba(74,222,128,.5)'],['grid_382','rgba(34,197,94,.55)'],['grid_50','rgba(234,179,8,.6)'],['grid_618','rgba(239,68,68,.55)'],['grid_75','rgba(220,38,38,.55)']];
+  for(var g=0; g<gridDefs.length; g++){
+    var gv=etf[gridDefs[g][0]];
+    if(gv==null) continue;
+    var gy=H-((gv-min)/range)*H;
+    if(gy>0 && gy<H){
+      ctx.beginPath();
+      ctx.setLineDash([4,3]);
+      ctx.moveTo(0,gy); ctx.lineTo(W,gy);
+      ctx.strokeStyle=gridDefs[g][1]; ctx.lineWidth=1; ctx.stroke();
+      ctx.setLineDash([]);
     }
   }
 }
@@ -328,8 +378,10 @@ function drawChart(canvas, etf){
 function R(){
   var q=(document.getElementById('q').value||'').toLowerCase();
   var sort=document.getElementById('sort').value;
+  var zone=document.getElementById('zone').value;
   var arr=D._etfs.slice();
   if(q) arr=arr.filter(function(e){return e.name.toLowerCase().indexOf(q)>=0||e.code.indexOf(q)>=0});
+  if(zone) arr=arr.filter(function(e){return e.grid_zone===+zone});
   arr=D.sort(arr,sort);
   document.getElementById('rc').textContent=arr.length+' ETFs';
   renderGrid(arr);
@@ -340,39 +392,31 @@ function discountClass(v){return v<-0.3?'green':v>0.3?'red':'';}
 function pctClass(v){if(v==null)return'';return v<=5?'lo':v<=15?'mi':'hi';}
 function peClass(v){if(v==null)return'';return v<=30?'lo':v<=70?'mi':'hi';}
 function corrClass(v){if(v==null)return'';if(v<0)return'lo';return v<=0.3?'mi':v<=0.7?'':'hi';}
+function zoneInfo(e){var z=e.grid_zone;if(z==null)return{label:'--',cls:''};return{label:z+'区',cls:'z'+z};}
+function floorKey(e){var z=e.grid_zone;if(z==null)return null;return z===1?'min_price_1y':z===2?'grid_25':z===3?'grid_382':z===4?'grid_50':z===5?'grid_618':'grid_75';}
+function zoneBand(e){var z=e.grid_zone;if(z==null)return null;var lo,hi;if(z===1){lo=e.min_price_1y;hi=e.grid_25;}else if(z===2){lo=e.grid_25;hi=e.grid_382;}else if(z===3){lo=e.grid_382;hi=e.grid_50;}else if(z===4){lo=e.grid_50;hi=e.grid_618;}else if(z===5){lo=e.grid_618;hi=e.grid_75;}else{lo=e.grid_75;hi=e.max_price_1y;}if(lo==null||hi==null||hi<=lo)return null;return{lo:lo,hi:hi};}
+function fmt3(v){return v==null?'--':(+v).toFixed(3);}
+function fmtMoney(v){if(v==null||!isFinite(v))return'--';if(v>=10000)return(v/10000).toFixed(v%10000?1:0)+'万';return Math.round(v)+'元';}
+function renderZoneAmts(e,perShare){var z=e.grid_zone||0,w=[0,2,2,2,2,2],p=[];for(var k=1;k<=6;k++){var lbl;if(k===6){lbl='6区不操作';}else{var a=perShare*w[k];lbl=k+'区'+fmtMoney(a);}p.push(k===z?'<span class="zone-pill z'+k+'">'+lbl+'</span>':'<span class="zone-amt">'+lbl+'</span>');}return p.join(' ');}
 
 function renderGrid(arr){
   var h='';
   for(var i=0;i<arr.length;i++){
     var e=arr[i];
     var dClass=e.discount_rate<-0.3?'discount':e.discount_rate>0.3?'premium':'neutral';
-    var dColor=e.discount_rate<-0.3?'green':e.discount_rate>0.3?'red':'';
-    var pLow=pctClass(e.pct_from_low), pBB=pctClass(e.pct_from_bb_low);
-    var peCl=peClass(e.pe_percentile);
-    var chgCl=e.change_pct>=0?'green':'red';
-    var feeStr=e.total_fee||(e.mgmt_fee||'--');
 
     h+='<div class="etf-card '+dClass+'" onclick="window.open(\'https://quote.eastmoney.com/etf/'+e.code+'.html\',\'_blank\')">';
-    h+='<div class="card-header"><span class="card-name">'+esc(e.name)+'</span><span class="card-code">'+e.code+'</span></div>';
+    h+='<div class="card-header"><div class="card-title"><span class="card-name">'+esc(e.name)+'</span><span class="card-code">'+e.code+'</span></div><div class="card-latest"><span class="cml">最新价</span><span class="cmv">'+e.latest_price.toFixed(3)+'</span></div></div>';
     h+='<div class="card-body">';
-    h+='<div class="card-m"><span class="cml">最新价</span><span class="cmv">'+e.latest_price.toFixed(3)+'</span></div>';
-    h+='<div class="card-m"><span class="cml">折溢价</span><span class="cmv '+dColor+'">'+(e.discount_rate>0?'+':'')+e.discount_rate.toFixed(2)+'%</span></div>';
-    h+='<div class="card-m"><span class="cml">规模</span><span class="cmv">'+(e.fund_size_yi||'--')+'亿</span></div>';
-    h+='<div class="card-m"><span class="cml">涨跌幅</span><span class="cmv '+chgCl+'">'+(e.change_pct>0?'+':'')+e.change_pct.toFixed(2)+'%</span></div>';
-    h+='<div class="card-m"><span class="cml">费率</span><span class="cmv">'+feeStr+'</span></div>';
-    h+='<div class="card-m"><span class="cml">换手率</span><span class="cmv">'+(e.turnover_rate||0).toFixed(1)+'%</span></div>';
-    var crCl=corrClass(e.corr_300);
-    h+='<div class="card-m"><span class="cml">vs沪深300</span><span class="cmv '+crCl+'">'+(e.corr_300!=null?(e.corr_300>0?'+':'')+e.corr_300.toFixed(2):'--')+'</span></div>';
-    if(e.pe_percentile!=null){
-      h+='<div class="card-m"><span class="cml">PE分位(3Y)</span><span class="cmv '+peCl+'">'+e.pe_percentile.toFixed(1)+'%</span></div>';
-    }else{
-      h+='<div class="card-m"><span class="cml">PE分位(3Y)</span><span class="cmv" style="color:var(--muted)">--</span></div>';
-    }
-    if(e.pct_from_low!=null){
-      h+='<div class="card-m"><span class="cml">距1Y低点</span><span class="cmv '+pLow+'">'+e.pct_from_low.toFixed(1)+'%</span></div>';
-    }else{
-      h+='<div class="card-m"><span class="cml">1Y最低</span><span class="cmv">'+(e.min_price_1y||'--')+'</span></div>';
-    }
+    h+='<div class="card-m"><span class="cml">1Y最低</span><span class="cmv">'+fmt3(e.min_price_1y)+'</span></div>';
+    h+='<div class="card-m"><span class="cml">0.618</span><span class="cmv">'+fmt3(e.grid_618)+'</span></div>';
+    h+='<div class="card-m"><span class="cml">0.25</span><span class="cmv">'+fmt3(e.grid_25)+'</span></div>';
+    h+='<div class="card-m"><span class="cml">0.75</span><span class="cmv">'+fmt3(e.grid_75)+'</span></div>';
+    h+='<div class="card-m"><span class="cml">0.382</span><span class="cmv">'+fmt3(e.grid_382)+'</span></div>';
+    h+='<div class="card-m"><span class="cml">1Y最高</span><span class="cmv">'+fmt3(e.max_price_1y)+'</span></div>';
+    h+='<div class="card-m"><span class="cml">0.5</span><span class="cmv">'+fmt3(e.grid_50)+'</span></div>';
+    var zi=zoneInfo(e);
+    h+='<div class="card-m full"><span class="cml">网格区域</span><span class="cmv"><span class="zone-pill '+zi.cls+'">'+zi.label+'</span></span></div>';
     h+='</div>';
     h+='<div class="card-chart"><canvas id="cv'+i+'"></canvas></div>';
     h+='</div>';
@@ -389,26 +433,35 @@ function renderGrid(arr){
 }
 
 function renderTable(arr){
+  var budget=parseFloat((document.getElementById('budget')||{}).value)||0;
+  var perShare=budget>0?budget/10:0;
   var h='';
   for(var i=0;i<arr.length;i++){
     var e=arr[i];
-    var dColor=discountClass(e.discount_rate);
     var pLow=pctClass(e.pct_from_low), pBB=pctClass(e.pct_from_bb_low);
     var peCl=peClass(e.pe_percentile), crCl=corrClass(e.corr_300);
-    var chgCl=e.change_pct>=0?'green':'red';
     h+='<tr onclick="window.open(\'https://quote.eastmoney.com/etf/'+e.code+'.html\',\'_blank\')">';
     h+='<td>'+(i+1)+'</td>';
     h+='<td class="t-name">'+esc(e.name)+'<span class="t-code">'+e.code+'</span></td>';
     h+='<td>'+e.latest_price.toFixed(3)+'</td>';
-    h+='<td class="t-discount '+dColor+'">'+(e.discount_rate>0?'+':'')+e.discount_rate.toFixed(2)+'%</td>';
-    h+='<td class="'+chgCl+'">'+(e.change_pct>0?'+':'')+e.change_pct.toFixed(2)+'%</td>';
-    h+='<td>'+(e.fund_size_yi||'--')+'</td>';
+    var fk=floorKey(e);
+    h+='<td class="'+(fk==='min_price_1y'?'t-floor':'')+'">'+fmt3(e.min_price_1y)+'</td>';
+    h+='<td class="'+(fk==='max_price_1y'?'t-floor':'')+'">'+fmt3(e.max_price_1y)+'</td>';
+    h+='<td class="'+(fk==='grid_25'?'t-floor':'')+'">'+fmt3(e.grid_25)+'</td>';
+    h+='<td class="'+(fk==='grid_382'?'t-floor':'')+'">'+fmt3(e.grid_382)+'</td>';
+    h+='<td class="'+(fk==='grid_50'?'t-floor':'')+'">'+fmt3(e.grid_50)+'</td>';
+    h+='<td class="'+(fk==='grid_618'?'t-floor':'')+'">'+fmt3(e.grid_618)+'</td>';
+    h+='<td class="'+(fk==='grid_75'?'t-floor':'')+'">'+fmt3(e.grid_75)+'</td>';
+    var zi=zoneInfo(e);
+    h+='<td><span class="zone-pill '+zi.cls+'">'+zi.label+'</span></td>';
+    h+='<td>'+(perShare>0?renderZoneAmts(e,perShare):'<span class="zone-amt">--</span>')+'</td>';
     h+='<td>'+(e.total_fee||e.mgmt_fee||'--')+'</td>';
-    h+='<td class="t-pe '+peCl+'">'+(e.pe_percentile!=null?e.pe_percentile.toFixed(1)+'%':'--')+'</td>';
+    h+='<td>'+(e.fund_size_yi||'--')+'</td>';
+    h+='<td>'+(e.turnover_rate||0).toFixed(1)+'%</td>';
     h+='<td class="t-pct '+crCl+'">'+(e.corr_300!=null?(e.corr_300>0?'+':'')+e.corr_300.toFixed(2):'--')+'</td>';
+    h+='<td class="t-pe '+peCl+'">'+(e.pe_percentile!=null?e.pe_percentile.toFixed(1)+'%':'--')+'</td>';
     h+='<td class="t-pct '+pLow+'">'+(e.pct_from_low!=null?e.pct_from_low.toFixed(1)+'%':'--')+'</td>';
     h+='<td class="t-pct '+pBB+'">'+(e.pct_from_bb_low!=null?e.pct_from_bb_low.toFixed(1)+'%':'--')+'</td>';
-    h+='<td>'+(e.turnover_rate||0).toFixed(1)+'%</td>';
     h+='</tr>';
   }
   document.getElementById('tb').innerHTML=h;
@@ -527,6 +580,24 @@ function exportExcel(){
   }, 2000);
 }
 
+// ════════════════════  PushPlus WeChat Push  ════════════════════
+async function pushPlus(){
+  var base = D._detectApi();
+  var btn = document.getElementById('btnP');
+  btn.disabled = true;
+  btn.textContent = '⏳ Pushing...';
+  try{
+    var r = await fetch(base+'/api/pushplus',{signal:AbortSignal.timeout(30000)});
+    var j = await r.json();
+    if(j.status==='ok') toast('✅ PushPlus sent','ok');
+    else toast('❌ '+(j.msg||'PushPlus failed'),'err');
+  }catch(e){
+    toast('❌ PushPlus error: '+e.message,'err');
+  }
+  btn.disabled = false;
+  btn.textContent = '🔔 PushPlus';
+}
+
 // ════════════════════  Toast  ════════════════════
 function toast(msg,type){
   var t=document.getElementById('toast');
@@ -537,6 +608,8 @@ function toast(msg,type){
 
 // ════════════════════  Init  ════════════════════
 (function init(){
+  var _b=localStorage.getItem('etf_budget');
+  if(_b!=null) document.getElementById('budget').value=_b;
   D.load(false, 'quick');
   var base = D._detectApi();
   console.log('ETF Screener ready, API:',base);

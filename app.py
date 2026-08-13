@@ -2,7 +2,8 @@
 ETF Screener Backend — HTTP Server
 Start: python app.py
 Serves ETF dashboard + /api/etf_data endpoint
-Data sources: akshare (spot/fee/PE) + baostock (K-line history)
+Data sources: akshare (spot/fee/PE/累计净值) + baostock (latest-price fallback)
+前复权 K-line derived from 累计净值 (baostock ignores adjustflag for ETFs).
 """
 import json, os, sys, time, threading, re
 from datetime import datetime, timedelta, timezone
@@ -32,6 +33,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CACHE_DIR = BASE_DIR / 'cache'
 CACHE_FILE = CACHE_DIR / 'etf_cache.json'
 META_FILE = CACHE_DIR / 'etf_metadata.json'  # fund size, fees, PE — slow-changing
+NAV_FILE = CACHE_DIR / 'etf_nav_cache.json'  # 累计净值 (前复权 source)
 os.chdir(BASE_DIR)
 
 # Load .env if present
@@ -60,6 +62,7 @@ ETF_LIST = [
     '510300',  # 沪深300ETF华泰柏瑞
     '515880',  # 通信ETF国泰
     '588780',  # 科创芯片设计ETF国联安
+    '159796',  # 电池ETF汇添富
     # 对冲仓 — 防御/避险
     '518680',  # 黄金ETF华夏（费率0.2% vs 华安0.6%）
     '511260',  # 十年国债ETF国泰
@@ -69,6 +72,7 @@ BENCHMARK_ETF = '510300'  # 对冲基准：沪深300
 
 # Fallback names for ETFs not covered by akshare spot data
 ETF_NAMES = {
+    '159796': '电池ETF汇添富',
     '518680': '黄金ETF华夏',
     '511260': '十年国债ETF国泰',
     '512890': '红利低波ETF华泰柏瑞',
@@ -110,6 +114,43 @@ def calc_bollinger(closes, period=20, std_mult=2):
     upper = middle + std_mult * std
     lower = middle - std_mult * std
     return middle.values, upper.values, lower.values
+
+
+def calc_grid(low, high, price):
+    """
+    Fibonacci grid between 1Y low and 1Y high.
+    5 lines (0.25 / 0.382 / 0.5 / 0.618 / 0.75) → 6 zones (bottom→top: 1..6).
+    Zones 1-5 each hold 2份 (2 units); zone 6 is a no-op (不操作).
+    Returns line prices + current zone (1-6).
+    """
+    if not low or not high or high <= low:
+        return {'grid_25': None, 'grid_382': None, 'grid_50': None,
+                'grid_618': None, 'grid_75': None, 'grid_zone': None}
+    rng = high - low
+    l25 = low + 0.25 * rng
+    l382 = low + 0.382 * rng
+    l50 = low + 0.5 * rng
+    l618 = low + 0.618 * rng
+    l75 = low + 0.75 * rng
+    zone = 1
+    if price >= l25:
+        zone = 2
+    if price >= l382:
+        zone = 3
+    if price >= l50:
+        zone = 4
+    if price >= l618:
+        zone = 5
+    if price >= l75:
+        zone = 6
+    return {
+        'grid_25': round(l25, 4),
+        'grid_382': round(l382, 4),
+        'grid_50': round(l50, 4),
+        'grid_618': round(l618, 4),
+        'grid_75': round(l75, 4),
+        'grid_zone': zone,
+    }
 
 
 def fetch_all_data(progress_cb=None):
@@ -162,6 +203,13 @@ def fetch_all_data(progress_cb=None):
             # To be filled by history/fee/PE steps
             'price_history': None,
             'min_price_1y': None,
+            'max_price_1y': None,
+            'grid_25': None,
+            'grid_382': None,
+            'grid_50': None,
+            'grid_618': None,
+            'grid_75': None,
+            'grid_zone': None,
             'pct_from_low': None,
             'bb_lower': None,
             'pct_from_bb_low': None,
@@ -185,94 +233,59 @@ def fetch_all_data(progress_cb=None):
                 'turnover_rate': 0, 'fund_size': 0, 'fund_size_yi': 0,
                 'update_time': '', 'data_date': '',
                 'price_history': None, 'min_price_1y': None,
+                'max_price_1y': None, 'grid_25': None, 'grid_382': None,
+                'grid_50': None, 'grid_618': None, 'grid_75': None, 'grid_zone': None,
                 'pct_from_low': None, 'bb_lower': None,
                 'pct_from_bb_low': None,
                 'mgmt_fee': None, 'custody_fee': None, 'total_fee': None,
                 'pe_percentile': None, 'pe_current': None,
             })
 
-    # ── Step 2: K-line history via baostock ──────────────────────
+    # ── Step 2: latest price fallback + 前复权 K-line (NAV) ───────
     end_date = bj_now().strftime('%Y-%m-%d')
-    start_date_1y = (bj_now() - timedelta(days=380)).strftime('%Y-%m-%d')  # Extra margin
 
-    # Baostock login (required once)
+    # Baostock — only to fill latest_price for ETFs missing from spot data
+    # (baostock ignores adjustflag for ETFs, so we do NOT use it for 1Y range).
     try:
         bs.login()
         log('  baostock logged in')
     except Exception as e:
         log(f'  baostock login ERROR: {e}')
 
-    for i, etf in enumerate(results):
+    for etf in results:
         code = etf['code']
-        # Convert to baostock format: 51xxxx→sh, 15xxxx→sz
+        if etf.get('latest_price'):
+            continue
         bs_code = ('sh.' if code.startswith('5') else 'sz.') + code
         try:
-            log(f'  K-line [{i+1}/{len(results)}] {bs_code}')
             rs = bs.query_history_k_data_plus(
-                bs_code, 'date,close,high,low,volume',
-                start_date=start_date_1y, end_date=end_date,
-                frequency='d', adjustflag='2'
+                bs_code, 'date,close',
+                start_date=(bj_now() - timedelta(days=10)).strftime('%Y-%m-%d'),
+                end_date=end_date, frequency='d', adjustflag='3'
             )
-            if rs.error_code != '0' or not rs.data:
-                log(f'    No data: {rs.error_msg}')
-                continue
-
-            # Parse data: [date, close, high, low, volume]
-            dates = []
-            closes = []
-            lows = []
-            for row in rs.data:
-                try:
-                    dates.append(row[0])
-                    closes.append(float(row[1]))
-                    lows.append(float(row[3]))
-                except (ValueError, IndexError):
-                    continue
-
-            if len(closes) < 20:
-                log(f'    Insufficient data: {len(closes)} rows')
-                continue
-
-            # 60-day price history for chart
-            chart_closes = closes[-60:] if len(closes) >= 20 else closes
-            etf['price_history'] = [round(c, 4) for c in chart_closes]
-
-            # 1-year low
-            if len(lows) > 0:
-                etf['min_price_1y'] = round(min(lows), 4)
-                if etf['min_price_1y'] > 0:
-                    etf['pct_from_low'] = round(
-                        (etf['latest_price'] - etf['min_price_1y']) / etf['min_price_1y'] * 100, 2
-                    )
-
-            # Bollinger Bands (20-day, use last 60 closes for stability)
-            bb_mid, bb_upper, bb_lower = calc_bollinger(closes[-60:], period=20)
-            if bb_lower is not None and len(bb_lower) > 0:
-                # Lower band curve (last 40 values; first 20 are NaN from rolling window)
-                bb_lo = [round(float(v), 4) for v in bb_lower[-40:] if not np.isnan(v)]
-                if bb_lo:
-                    etf['bb_lower_history'] = bb_lo
-                last_lower = float(bb_lower[-1])
-                if not np.isnan(last_lower) and last_lower > 0:
-                    etf['bb_lower'] = round(last_lower, 4)
-                    etf['pct_from_bb_low'] = round(
-                        (etf['latest_price'] - last_lower) / last_lower * 100, 2
-                    )
-                # Upper band curve
-                bb_hi = [round(float(v), 4) for v in bb_upper[-40:] if not np.isnan(v)]
-                if bb_hi:
-                    etf['bb_upper_history'] = bb_hi
-                    etf['bb_upper'] = round(float(bb_upper[-1]), 4) if not np.isnan(bb_upper[-1]) else None
-
-            time.sleep(0.1)  # Baostock is fast, small delay
-
+            if rs.error_code == '0' and rs.data:
+                etf['latest_price'] = round(float(rs.data[-1][1]), 4)
         except Exception as e:
-            log(f'  K-line ERROR {code}: {e}')
+            log(f'  K-line fallback ERROR {code}: {e}')
 
     try:
         bs.logout()
     except Exception:
         pass
+
+    # 累计净值 → 前复权 for chart / 1Y low/high / grid / Bollinger.
+    log('Fetching NAV history (前复权)...')
+    nav_data = fetch_nav_series(ETF_LIST, log)
+    save_nav_cache(nav_data)
+
+    for etf in results:
+        code = etf['code']
+        nav = nav_data.get(code)
+        adj = nav_to_adj_closes(nav, etf.get('latest_price'))
+        if adj:
+            compute_from_closes(etf, adj, etf.get('latest_price'))
+        else:
+            log(f'  NAV missing for {code}, derived fields left empty')
 
     # ── Step 3: Fees for each ETF ─────────────────────────────────
     for i, etf in enumerate(results):
@@ -377,7 +390,8 @@ def calc_correlations(etfs):
     for e in etfs:
         ph = e.get('price_history')
         if ph and len(ph) >= 20:
-            price_map[e['code']] = pd.Series(ph)
+            # price_history now holds ~260 days (full 1Y); correlation stays 60-day
+            price_map[e['code']] = pd.Series(ph[-60:])
     if BENCHMARK_ETF not in price_map:
         return
     bench_returns = price_map[BENCHMARK_ETF].pct_change().dropna()
@@ -437,10 +451,114 @@ def load_metadata():
     return {}
 
 
+# ── 前复权 K-line via 累计净值 ───────────────────────────────────
+# baostock ignores adjustflag for ETFs (returns 不复权), so split jumps
+# corrupt the 1Y low/high. 累计净值 (cumulative NAV) is the exchange's own
+# split+dividend-adjusted series (smooth), reliable via eastmoney fund API.
+
+def fetch_nav_series(codes, progress_cb=None):
+    """Fetch 累计净值 (cumulative NAV) for ETFs, filtered to ~last 400 days.
+    Returns {code: {'dates': [str], 'cum': [float]}}."""
+    import akshare as ak
+
+    def log(msg):
+        if progress_cb:
+            progress_cb(msg)
+        else:
+            print(f'[{bj_now():%H:%M:%S}] {msg}')
+
+    cutoff = (bj_now() - timedelta(days=400)).strftime('%Y-%m-%d')
+    out = {}
+    for i, code in enumerate(codes):
+        try:
+            df = ak.fund_open_fund_info_em(symbol=code, indicator='累计净值走势')
+            if df is None or df.empty:
+                log(f'  NAV [{i+1}/{len(codes)}] {code}: empty')
+                continue
+            dcol, ncol = df.columns[0], df.columns[1]
+            dates = [str(x)[:10] for x in df[dcol]]
+            cum = [safe_float(x) for x in df[ncol]]
+            keep = [(d, c) for d, c in zip(dates, cum) if d >= cutoff]
+            if not keep:
+                log(f'  NAV [{i+1}/{len(codes)}] {code}: no recent data')
+                continue
+            out[code] = {'dates': [k[0] for k in keep], 'cum': [k[1] for k in keep]}
+            log(f'  NAV [{i+1}/{len(codes)}] {code}: {len(keep)} pts')
+        except Exception as e:
+            log(f'  NAV ERROR {code}: {e}')
+        time.sleep(0.25)
+    return out
+
+
+def load_nav_cache():
+    """Load cached 累计净值 series."""
+    if NAV_FILE.exists():
+        try:
+            with open(NAV_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_nav_cache(nav_data):
+    """Save 累计净值 series to disk."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(NAV_FILE, 'w', encoding='utf-8') as f:
+            json.dump(nav_data, f, ensure_ascii=False)
+    except Exception as e:
+        print(f'Nav cache save error: {e}')
+
+
+def nav_to_adj_closes(nav, latest_price):
+    """Rescale 累计净值 (后复权) → 前复权 closes anchored at latest_price."""
+    if not nav or not nav.get('cum') or not latest_price:
+        return None
+    cum = nav['cum']
+    cum_now = cum[-1] if cum else 0
+    if not cum_now:
+        return None
+    scale = latest_price / cum_now
+    return [c * scale for c in cum]
+
+
+def compute_from_closes(etf, closes, latest_price):
+    """Compute chart / 1Y range / Fibonacci grid / Bollinger from a closes array.
+    The chart shows the full 1Y window so 1Y min/max lines intersect the curve."""
+    if not closes:
+        return
+    window = closes[-260:] if len(closes) >= 260 else closes
+    etf['price_history'] = [round(c, 4) for c in window]
+    if window:
+        etf['min_price_1y'] = round(min(window), 4)
+        etf['max_price_1y'] = round(max(window), 4)
+        if etf['min_price_1y'] > 0 and latest_price:
+            etf['pct_from_low'] = round(
+                (latest_price - etf['min_price_1y']) / etf['min_price_1y'] * 100, 2
+            )
+        etf.update(calc_grid(etf['min_price_1y'], etf['max_price_1y'], latest_price))
+    bb_mid, bb_upper, bb_lower = calc_bollinger(window, period=20)
+    if bb_lower is not None and len(bb_lower) > 0:
+        # Full valid BB series (drop the first 19 NaN from rolling window), right-aligned to chart
+        bb_lo = [round(float(v), 4) for v in bb_lower if not np.isnan(v)]
+        if bb_lo:
+            etf['bb_lower_history'] = bb_lo
+        ll = float(bb_lower[-1])
+        if not np.isnan(ll) and ll > 0:
+            etf['bb_lower'] = round(ll, 4)
+            if latest_price:
+                etf['pct_from_bb_low'] = round((latest_price - ll) / ll * 100, 2)
+        bb_hi = [round(float(v), 4) for v in bb_upper if not np.isnan(v)]
+        if bb_hi:
+            etf['bb_upper_history'] = bb_hi
+            etf['bb_upper'] = round(float(bb_upper[-1]), 4) if not np.isnan(bb_upper[-1]) else None
+
+
 def fetch_prices_quick(progress_cb=None):
     """
-    Fast refresh: baostock K-line only (3s), metadata from cache.
-    No akshare calls — skips the 110s spot data fetch.
+    Fast refresh: baostock latest close (fast) + cached 累计净值 (前复权).
+    No akshare calls — keeps ~3s speed; 1Y range/grid/chart come from NAV cache.
     """
     def log(msg):
         if progress_cb:
@@ -448,9 +566,10 @@ def fetch_prices_quick(progress_cb=None):
         print(f'[{bj_now():%H:%M:%S}] {msg}')
 
     meta = load_metadata()
+    nav_cache = load_nav_cache()
     results = []
     end_date = bj_now().strftime('%Y-%m-%d')
-    start_date_1y = (bj_now() - timedelta(days=380)).strftime('%Y-%m-%d')
+    start_date = (bj_now() - timedelta(days=10)).strftime('%Y-%m-%d')
 
     try:
         bs.login()
@@ -467,6 +586,13 @@ def fetch_prices_quick(progress_cb=None):
             'latest_price': 0,
             'price_history': None,
             'min_price_1y': None,
+            'max_price_1y': None,
+            'grid_25': None,
+            'grid_382': None,
+            'grid_50': None,
+            'grid_618': None,
+            'grid_75': None,
+            'grid_zone': None,
             'pct_from_low': None,
             'bb_lower': None,
             'pct_from_bb_low': None,
@@ -491,49 +617,19 @@ def fetch_prices_quick(progress_cb=None):
         }
         try:
             rs = bs.query_history_k_data_plus(
-                bs_code, 'date,close,high,low,volume',
-                start_date=start_date_1y, end_date=end_date,
-                frequency='d', adjustflag='2'
+                bs_code, 'date,close',
+                start_date=start_date, end_date=end_date,
+                frequency='d', adjustflag='3'
             )
-            if rs.error_code != '0' or not rs.data:
-                results.append(etf)
-                continue
-
-            closes = [float(r[1]) for r in rs.data]
-            lows = [float(r[3]) for r in rs.data]
-
-            if len(closes) < 10:
-                etf['latest_price'] = closes[-1] if closes else 0
-                results.append(etf)
-                continue
-
-            etf['latest_price'] = round(closes[-1], 4)
-            etf['price_history'] = [round(c, 4) for c in closes[-60:]]
-            etf['min_price_1y'] = round(min(lows), 4)
-            if etf['min_price_1y'] > 0:
-                etf['pct_from_low'] = round(
-                    (etf['latest_price'] - etf['min_price_1y']) / etf['min_price_1y'] * 100, 2
-                )
-
-            bb_mid, bb_upper, bb_lower = calc_bollinger(closes[-60:], period=20)
-            if bb_lower is not None and len(bb_lower) > 0:
-                bb_lo = [round(float(v), 4) for v in bb_lower[-40:] if not np.isnan(v)]
-                if bb_lo:
-                    etf['bb_lower_history'] = bb_lo
-                ll = float(bb_lower[-1])
-                if not np.isnan(ll) and ll > 0:
-                    etf['bb_lower'] = round(ll, 4)
-                    etf['pct_from_bb_low'] = round(
-                        (etf['latest_price'] - ll) / ll * 100, 2
-                    )
-                bb_hi = [round(float(v), 4) for v in bb_upper[-40:] if not np.isnan(v)]
-                if bb_hi:
-                    etf['bb_upper_history'] = bb_hi
-                    etf['bb_upper'] = round(float(bb_upper[-1]), 4) if not np.isnan(bb_upper[-1]) else None
-
-            time.sleep(0.05)
+            if rs.error_code == '0' and rs.data:
+                etf['latest_price'] = round(float(rs.data[-1][1]), 4)
         except Exception as e:
             log(f'  Quick K-line ERROR {code}: {e}')
+
+        nav = nav_cache.get(code)
+        adj = nav_to_adj_closes(nav, etf.get('latest_price'))
+        if adj:
+            compute_from_closes(etf, adj, etf.get('latest_price'))
 
         results.append(etf)
 
@@ -621,10 +717,10 @@ def get_data(force_refresh=False, full=False):
             data = fetch_all_data()
         else:
             data = fetch_prices_quick()
-            # If no metadata exists, fall back to full
-            if data and not load_metadata():
+            # If no metadata or NAV cache exists, fall back to full
+            if data and (not load_metadata() or not load_nav_cache()):
                 log_msg = lambda m: print(f'[{bj_now():%H:%M:%S}] {m}')
-                log_msg('No metadata cache, falling back to full fetch...')
+                log_msg('No metadata/NAV cache, falling back to full fetch...')
                 data = fetch_all_data()
 
         if data:
@@ -667,18 +763,17 @@ def build_push_html(etfs) -> str:
         code = e.get('code', '-')
         name = e.get('name', code)
         price = e.get('latest_price', 0)
-        discount = e.get('discount_rate', 0)
-        pe_pct = e.get('pe_percentile')
-        pe_str = f'{pe_pct:.1f}%' if pe_pct is not None else '--'
-        pct_low = e.get('pct_from_low')
-        low_str = f'{pct_low:.1f}%' if pct_low is not None else '--'
-        d_color = '#059669' if discount < -0.3 else '#dc2626' if discount > 0.3 else '#64748b'
+        low = e.get('min_price_1y')
+        high = e.get('max_price_1y')
+        zone = e.get('grid_zone')
+        zone_str = f'{zone}区' if zone is not None else '--'
+        low_str = f'{low:.3f}' if low is not None else '--'
+        high_str = f'{high:.3f}' if high is not None else '--'
         rows += (
             f'<tr>'
             f'<td style="text-align:left">{name}<br><span style="font-size:10px;color:#8892b0">{code}</span></td>'
             f'<td style="font-weight:600">{price:.3f}</td>'
-            f'<td style="color:{d_color};font-weight:600">{discount:+.2f}%</td>'
-            f'<td>{low_str}</td><td>{pe_str}</td>'
+            f'<td>{low_str}</td><td>{high_str}</td><td>{zone_str}</td>'
             f'</tr>'
         )
     return (
@@ -687,7 +782,7 @@ def build_push_html(etfs) -> str:
         f'<h3>ETF Screener Report</h3>'
         f'<p style="color:#64748b;font-size:12px">{now_str} | {len(etfs)} ETFs</p>'
         f'<table style="width:100%;border-collapse:collapse;font-size:11px">'
-        f'<tr style="background:#f1f5f9"><th>Name</th><th>Price</th><th>Discount</th><th>1Y Low%</th><th>PE%</th></tr>'
+        f'<tr style="background:#f1f5f9"><th>name</th><th>latest</th><th>1Y low</th><th>1Y High</th><th>zone</th></tr>'
         f'{rows}</table></body></html>'
     )
 
@@ -702,6 +797,12 @@ class ETFHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format, *args):
         print(f'[{bj_now():%H:%M:%S}] {args[0]}')
+
+    def end_headers(self):
+        # Bust browser cache for static files (so HTML edits show up on refresh)
+        if self.path and not self.path.startswith('/api/'):
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        super().end_headers()
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -732,24 +833,14 @@ class ETFHandler(SimpleHTTPRequestHandler):
             # Default: full refresh (akshare+baostock, ~130s). Use ?quick=1 for fast mode (~3s).
             quick = qs.get('quick', ['0'])[0] == '1'
             async_mode = qs.get('async', ['0'])[0] == '1'
-            push_token = os.getenv('PUSHPLUS_TOKEN', '')
 
             def do_refresh():
-                data = get_data(force_refresh=True, full=not quick)
-                # PushPlus notification after full refresh
-                if not quick and data and push_token:
-                    try:
-                        html = build_push_html(data)
-                        ok = send_pushplus(push_token, f'ETF Screener ({len(data)} ETFs)', html)
-                        print(f'[{bj_now():%H:%M:%S}] PushPlus: {"OK" if ok else "FAIL"}')
-                    except Exception as ex:
-                        print(f'[{bj_now():%H:%M:%S}] PushPlus error: {ex}')
-                return data
+                return get_data(force_refresh=True, full=not quick)
 
             if async_mode:
                 t = threading.Thread(target=do_refresh, daemon=True)
                 t.start()
-                mode = 'quick (~3s)' if quick else 'full (~130s) + PushPlus'
+                mode = 'quick (~3s)' if quick else 'full (~130s)'
                 self._json_response({'status': 'ok', 'msg': f'Refresh started: {mode}'})
             else:
                 data = do_refresh()
@@ -758,6 +849,29 @@ class ETFHandler(SimpleHTTPRequestHandler):
                     'count': len(data) if data else 0,
                     'msg': f'Refreshed {len(data) if data else 0} ETFs',
                 })
+            return
+
+        # ── API: PushPlus WeChat push (manual button only) ────
+        if path == '/api/pushplus':
+            push_token = os.getenv('PUSHPLUS_TOKEN', '')
+            if not push_token:
+                self._json_response({'status': 'error', 'msg': 'PUSHPLUS_TOKEN not configured'})
+                return
+            data = get_data(force_refresh=False, full=False)
+            if not data:
+                self._json_response({'status': 'error', 'msg': 'No data available'})
+                return
+            # Sort by grid zone ascending (None last)
+            data = sorted(data, key=lambda e: (e.get('grid_zone') is None, e.get('grid_zone') or 0))
+            try:
+                html = build_push_html(data)
+                ok = send_pushplus(push_token, f'ETF Screener ({len(data)} ETFs)', html)
+                print(f'[{bj_now():%H:%M:%S}] PushPlus: {"OK" if ok else "FAIL"}')
+                self._json_response({'status': 'ok' if ok else 'error',
+                                     'msg': 'PushPlus sent' if ok else 'PushPlus failed'})
+            except Exception as ex:
+                print(f'[{bj_now():%H:%M:%S}] PushPlus error: {ex}')
+                self._json_response({'status': 'error', 'msg': f'PushPlus error: {ex}'})
             return
 
         # ── API: Health check ─────────────────────────────────
@@ -804,6 +918,13 @@ class ETFHandler(SimpleHTTPRequestHandler):
                 'PE当前': e.get('pe_current'),
                 '距1Y低点(%)': e.get('pct_from_low'),
                 '1Y最低': e.get('min_price_1y'),
+                '1Y最高': e.get('max_price_1y'),
+                '网格0.25': e.get('grid_25'),
+                '网格0.382': e.get('grid_382'),
+                '网格0.5': e.get('grid_50'),
+                '网格0.618': e.get('grid_618'),
+                '网格0.75': e.get('grid_75'),
+                '网格区域': e.get('grid_zone'),
                 'BB上轨': e.get('bb_upper'),
                 'BB下轨': e.get('bb_lower'),
                 '换手率(%)': e.get('turnover_rate', 0),
