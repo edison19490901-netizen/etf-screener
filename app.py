@@ -5,7 +5,7 @@ Serves ETF dashboard + /api/etf_data endpoint
 Data sources: akshare (spot/fee/PE/累计净值) + baostock (latest-price fallback)
 前复权 K-line derived from 累计净值 (baostock ignores adjustflag for ETFs).
 """
-import json, os, sys, time, threading, re
+import json, os, sys, time, threading, re, hashlib
 from datetime import datetime, timedelta, timezone
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from io import BytesIO
@@ -1154,6 +1154,33 @@ def build_report_markdown(a):
     return '\n'.join(L)
 
 
+# ── Auth (password page) ──────────────────────────────────────────
+
+PASSWORD_FILE = BASE_DIR / 'password.html'
+DASHBOARD_PASSWORD = os.getenv('DASHBOARD_PASSWORD', '')
+AUTH_COOKIE_NAME = 'etf_auth'
+
+def _make_token(password):
+    return hashlib.sha256(f'dash-salt-{password}'.encode()).hexdigest()
+
+def _parse_cookies(handler):
+    cookie_header = handler.headers.get('Cookie', '')
+    cookies = {}
+    for item in cookie_header.split(';'):
+        item = item.strip()
+        if '=' in item:
+            k, v = item.split('=', 1)
+            cookies[k.strip()] = v.strip()
+    return cookies
+
+def _check_auth(handler):
+    if not DASHBOARD_PASSWORD:
+        return True  # No password set = open access
+    cookies = _parse_cookies(handler)
+    token = cookies.get(AUTH_COOKIE_NAME, '')
+    return token == _make_token(DASHBOARD_PASSWORD)
+
+
 # ── HTTP Handler ─────────────────────────────────────────────────
 
 class ETFHandler(SimpleHTTPRequestHandler):
@@ -1251,12 +1278,21 @@ class ETFHandler(SimpleHTTPRequestHandler):
             self._json_response({'status': 'ok', 'time': bj_now().isoformat()})
             return
 
-        # ── Static files ──────────────────────────────────────
-        # Redirect root to dashboard
+        # ── Static files (password-gated) ─────────────────────
+        # Root: serve password page if configured, else redirect to dashboard
         if path == '/' or path == '':
-            self.send_response(302)
-            self.send_header('Location', '/etf_dashboard.html')
-            self.end_headers()
+            if DASHBOARD_PASSWORD and not _check_auth(self):
+                self._serve_password()
+            else:
+                self._redirect('/etf_dashboard.html')
+            return
+
+        # Dashboard: require auth when password configured
+        if path == '/etf_dashboard.html':
+            if DASHBOARD_PASSWORD and not _check_auth(self):
+                self._redirect('/')
+            else:
+                super().do_GET()   # serve the dashboard file
             return
 
         return super().do_GET()
@@ -1307,10 +1343,55 @@ class ETFHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == '/login':
+            self._handle_login()
+            return
         if path == '/api/pushplus_analysis':
             self._api_pushplus_analysis()
             return
         self._json_response({'status': 'error', 'msg': 'Not found'})
+
+    def _serve_password(self):
+        if PASSWORD_FILE.exists():
+            content = PASSWORD_FILE.read_bytes()
+        else:
+            content = b'<h1>password.html not found</h1>'
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(content)))
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _redirect(self, location):
+        self.send_response(302)
+        self.send_header('Location', location)
+        self.end_headers()
+
+    def _handle_login(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length).decode('utf-8')
+        params = parse_qs(body)
+        password = params.get('password', [''])[0]
+
+        if not DASHBOARD_PASSWORD:
+            # No password configured — allow access
+            token = _make_token('')
+            self.send_response(302)
+            self.send_header('Set-Cookie', f'{AUTH_COOKIE_NAME}={token}; Path=/; HttpOnly; Max-Age=86400; SameSite=Lax')
+            self.send_header('Location', '/etf_dashboard.html')
+            self.end_headers()
+        elif password == DASHBOARD_PASSWORD:
+            token = _make_token(password)
+            self.send_response(302)
+            self.send_header('Set-Cookie', f'{AUTH_COOKIE_NAME}={token}; Path=/; HttpOnly; Max-Age=86400; SameSite=Lax')
+            self.send_header('Location', '/etf_dashboard.html')
+            self.end_headers()
+        else:
+            self.send_response(302)
+            self.send_header('Location', '/?err=1')
+            self.end_headers()
 
     def _json_response(self, data):
         body = json.dumps(data, ensure_ascii=False, default=str).encode('utf-8')

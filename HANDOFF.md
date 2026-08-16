@@ -115,6 +115,13 @@ dashboard 顶部工具栏下方的「📊 行情解读」面板，随数据刷�
 - **推送**：`POST /api/pushplus_analysis` 复用 `send_pushplus` 推 markdown 报告（标题「ETF 行情解读 \<日期\>」）。
 - **前端**：`etf_dashboard.html` 的 `.analysis-panel` + `AN` JS 对象（load/render/renderFallback/push），接口不可用时降级为基础统计。
 
+## 密码保护 Auth
+
+- **后端密码页**（镜像 stock-screener）：设了 `DASHBOARD_PASSWORD` 后，访问 `/` 或 `/etf_dashboard.html` 先出 `password.html` 登录页，正确密码 → `Set-Cookie: etf_auth=<sha256>`（HttpOnly，24h）→ 跳看板。
+- **路由**：`/login`（POST，表单 `password`）→ `_handle_login`；错误密码 302 回 `/?err=1`。`/api/*` 接口**不鉴权**（与 stock-screener 一致，保证本地 file:// 直连 API 不受影响）。
+- **本地 file:// 打开**：绕过服务器、不弹密码（仅本机自己用，无风险）。要在浏览器测密码页用 `http://localhost:8081/`。
+- **未设密码**（环境变量为空）时完全公开，行为与之前一致。
+
 ## Key Code Locations
 
 | File | What |
@@ -130,8 +137,10 @@ dashboard 顶部工具栏下方的「📊 行情解读」面板，随数据刷�
 | `app.py:694-741` | get_data() cache logic |
 | `app.py:746-794` | send_pushplus() + build_push_html() |
 | `app.py:800-1155` | 行情解读 Analysis：HOLDINGS/HEDGE_ETFS + compute_trend_stats() + build_analysis() + build_report_markdown() |
-| `app.py:1157-1377` | HTTP API handlers（/api/etf_data /api/refresh /api/export /api/analysis /api/pushplus_analysis） |
+| `app.py:1157-1183` | 密码鉴权 Auth：DASHBOARD_PASSWORD/AUTH_COOKIE_NAME + _make_token/_parse_cookies/_check_auth |
+| `app.py:1186-1456` | HTTP API handlers（/api/etf_data /api/refresh /api/export /api/analysis /api/health /api/pushplus_analysis + /login 密码登录） |
 | `etf_dashboard.html` | Full frontend（含 .analysis-panel + AN 行情解读面板） |
+| `password.html` | 密码登录页（POST /login） |
 
 ## Environment Variables
 
@@ -139,6 +148,7 @@ dashboard 顶部工具栏下方的「📊 行情解读」面板，随数据刷�
 |-----|----------|---------|-------|
 | PORT | Yes | 8081 (local) | 本地默认 8081（避开 stock-screener 的 8080）；Render 部署时自动赋值 |
 | PUSHPLUS_TOKEN | No | — | PushPlus WeChat token |
+| DASHBOARD_PASSWORD | No | — | 看板访问密码（设了则先出 password.html；本地 file:// 打开绕过） |
 
 ## Troubleshooting
 

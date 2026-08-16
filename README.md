@@ -43,6 +43,7 @@ ETF Screener 是一个实时 ETF 监控面板，跟踪 **18 只精选 ETF**，�
 etf-screener/
 ├── app.py                  # 后端服务器（核心）
 ├── etf_dashboard.html      # 前端页面（自包含）
+├── password.html           # 密码登录页（可选）
 ├── update.py               # 每日定时更新脚本
 ├── requirements.txt        # Python 依赖
 ├── render.yaml             # Render 部署配置
@@ -185,6 +186,7 @@ Render 会自动检测 main 分支的更新并重新部署。
 |--------|------|--------|------|
 | `PORT` | 是 | `8081` | 服务端口（本地默认；Render 部署时由平台自动赋值） |
 | `PUSHPLUS_TOKEN` | 否 | 空 | PushPlus 微信推送 token，配置后 Full Refresh 完成自动推送 |
+| `DASHBOARD_PASSWORD` | 否 | 空 | 看板访问密码。设置后访问 `http://localhost:8081/` 或 Render 网址先出密码页；留空则完全公开 |
 
 ### PushPlus Token 获取
 
@@ -192,6 +194,13 @@ Render 会自动检测 main 分支的更新并重新部署。
 2. 微信扫码登录
 3. 复制你的 **token**
 4. 添加到 Render 环境变量
+
+### 看板密码（可选）
+
+1. 在 `.env`（本地）或 Render 环境变量中添加 `DASHBOARD_PASSWORD=你的密码`
+2. 重启服务后，访问 `/` 或 `/etf_dashboard.html` 会先出现密码页，输对密码才进看板
+3. 密码存服务端（sha256 token + HttpOnly cookie，24h 有效），不会出现在前端代码里
+4. 说明：`/api/*` 数据接口保持开放（保证本地 `file://` 直连可用）；本地用 `file://` 直接打开 HTML 会绕过密码页（仅本机自己用，无风险）
 
 ---
 
@@ -234,7 +243,8 @@ Render 会自动检测 main 分支的更新并重新部署。
 
 | 端点 | 方法 | 参数 | 说明 |
 |------|------|------|------|
-| `/` | GET | — | 重定向到 `/etf_dashboard.html` |
+| `/` | GET | — | 看板入口：设了 `DASHBOARD_PASSWORD` 则先出密码页 |
+| `/login` | POST | `password` | 密码登录，成功后设 cookie 并跳看板 |
 | `/api/etf_data` | GET | `?full=1` 全量；`?force=1` 跳过缓存 | 获取 ETF 数据 JSON |
 | `/api/refresh` | GET | `?async=1&quick=1` | 触发数据刷新 |
 | `/api/export` | GET | — | 下载 Excel 文件 |

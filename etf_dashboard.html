@@ -87,6 +87,7 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 .an-btn.pri:hover{opacity:.9}
 .an-btn:disabled{opacity:.6;cursor:not-allowed}
 .an-body{padding:12px 16px}
+.an-body.collapsed{display:none}
 .an-loading{color:var(--muted);font-size:.8rem;padding:12px 0;text-align:center}
 .an-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .an-chip{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:9px;padding:5px 10px;font-size:.72rem;color:var(--muted)}
@@ -168,6 +169,7 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 <span class="an-meta" id="anMeta">--</span>
 <button class="an-btn" onclick="AN.load(true)">🔄 刷新解读</button>
 <button class="an-btn pri" id="btnANP" onclick="AN.push()">📤 推送微信</button>
+<button class="an-btn" id="btnANT" onclick="AN.toggle()">收起</button>
 </div>
 <div class="an-body" id="anBody"><div class="an-loading">解读加载中…</div></div>
 </div>
@@ -660,6 +662,7 @@ function toast(msg,type){
 // ════════════════════ 行情解读 Analysis ════════════════════
 var AN={
   _loaded:false,
+  _collapsed:(localStorage.getItem('an_collapsed')==='1'),
   ZCOLORS:{1:'#22c55e',2:'#4ade80',3:'#eab308',4:'#fb923c',5:'#ef4444',6:'#9333ea'},
   GROUPS:[
     {key:'buy',title:'接近买入点（低估/偏低）'},
@@ -670,6 +673,20 @@ var AN={
   ],
   fmt:function(v,d){return (v==null||isNaN(v))?'--':(+v).toFixed((d==null?2:d));},
   chip:function(label,val,cls){return '<span class="an-chip">'+label+'<b class="'+((cls||''))+'">'+val+'</b></span>';},
+  init:function(){
+    var el=document.getElementById('anBody');
+    if(AN._collapsed&&el) el.classList.add('collapsed');
+    var b=document.getElementById('btnANT');
+    if(b) b.textContent=AN._collapsed?'展开':'收起';
+  },
+  toggle:function(){
+    AN._collapsed=!AN._collapsed;
+    localStorage.setItem('an_collapsed',AN._collapsed?'1':'0');
+    var el=document.getElementById('anBody');
+    if(el) el.classList.toggle('collapsed',AN._collapsed);
+    var b=document.getElementById('btnANT');
+    if(b) b.textContent=AN._collapsed?'展开':'收起';
+  },
   load:function(force){
     if(AN._loaded&&!force)return;
     var el=document.getElementById('anBody');
@@ -758,6 +775,7 @@ var AN={
   var _b=localStorage.getItem('etf_budget');
   if(_b!=null) document.getElementById('budget').value=_b;
   D.load(false, 'quick');
+  AN.init();
   AN.load(false);
   var base = D._detectApi();
   console.log('ETF Screener ready, API:',base);
