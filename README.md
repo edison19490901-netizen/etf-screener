@@ -82,12 +82,12 @@ pip install -r requirements.txt
 python app.py
 ```
 
-首次启动会自动从 akshare 拉取数据（约 130 秒），之后数据缓存在 `cache/` 目录。服务器监听 `http://localhost:8080`。
+首次启动会自动从 akshare 拉取数据（约 130 秒），之后数据缓存在 `cache/` 目录。服务器监听 `http://localhost:8081`（本地默认端口，避开 stock-screener 的 8080）。
 
 ### 1.5 命令行参数
 
 ```bash
-python app.py --port 9090      # 自定义端口（默认 8080）
+python app.py --port 9090      # 自定义端口（默认 8081）
 python app.py --prefetch       # 启动时预加载数据（默认开启）
 ```
 
@@ -183,7 +183,7 @@ Render 会自动检测 main 分支的更新并重新部署。
 
 | 变量名 | 必填 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `PORT` | 是 | `8080` | 服务端口 |
+| `PORT` | 是 | `8081` | 服务端口（本地默认；Render 部署时由平台自动赋值） |
 | `PUSHPLUS_TOKEN` | 否 | 空 | PushPlus 微信推送 token，配置后 Full Refresh 完成自动推送 |
 
 ### PushPlus Token 获取
@@ -340,9 +340,9 @@ jobs:
 cat cache/etf_cache.json | python -m json.tool | head -50
 
 # 测试 API
-curl http://localhost:8080/api/etf_data | python -m json.tool | head -30
-curl http://localhost:8080/api/health
-curl -o test.xlsx http://localhost:8080/api/export
+curl http://localhost:8081/api/etf_data | python -m json.tool | head -30
+curl http://localhost:8081/api/health
+curl -o test.xlsx http://localhost:8081/api/export
 
 # 单独测试数据获取
 python -c "

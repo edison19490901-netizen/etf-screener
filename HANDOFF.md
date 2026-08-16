@@ -119,7 +119,7 @@ Per-ETF grid between **1Y low** and **1Y high**, 5 Fibonacci lines (0.25 / 0.382
 
 | Var | Required | Default | Where |
 |-----|----------|---------|-------|
-| PORT | Yes | 8080 | Render auto-sets |
+| PORT | Yes | 8081 (local) | 本地默认 8081（避开 stock-screener 的 8080）；Render 部署时自动赋值 |
 | PUSHPLUS_TOKEN | No | — | PushPlus WeChat token |
 
 ## Troubleshooting

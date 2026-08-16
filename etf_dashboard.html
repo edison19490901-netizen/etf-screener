@@ -75,6 +75,44 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 @media(max-width:768px){.container{padding:8px}.header{padding:18px 8px 12px}.header h1{font-size:1.2rem}
 .grid-view{grid-template-columns:1fr}.grid-view.active{grid-template-columns:1fr}
 .toolbar{flex-direction:column;align-items:stretch}th,td{padding:4px 3px;font-size:.65rem}}
+
+/* ── 行情解读 Analysis ─────────────────────── */
+.analysis-panel{background:var(--card);border:1px solid var(--border);border-radius:14px;margin-bottom:14px;overflow:hidden}
+.an-head{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.an-title{font-weight:600;font-size:.9rem;flex:1}
+.an-meta{font-size:.7rem;color:var(--muted)}
+.an-btn{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:.75rem;cursor:pointer;transition:.2s}
+.an-btn:hover{border-color:var(--accent);color:var(--text)}
+.an-btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+.an-btn.pri:hover{opacity:.9}
+.an-btn:disabled{opacity:.6;cursor:not-allowed}
+.an-body{padding:12px 16px}
+.an-loading{color:var(--muted);font-size:.8rem;padding:12px 0;text-align:center}
+.an-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.an-chip{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:9px;padding:5px 10px;font-size:.72rem;color:var(--muted)}
+.an-chip b{display:block;font-size:.95rem;color:var(--text);font-weight:600;font-family:monospace}
+.an-chip b.up{color:var(--green)}.an-chip b.dn{color:var(--red)}.an-chip b.accent{color:#a5b4fc}
+.zone-bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin-bottom:6px;background:rgba(255,255,255,.05)}
+.zone-bar i{display:block;height:100%}
+.zone-leg{display:flex;gap:10px;flex-wrap:wrap;font-size:.7rem;color:var(--muted);margin-bottom:12px}
+.zone-leg b{font-weight:700}
+.an-summary{background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:10px;padding:10px 12px;font-size:.82rem;line-height:1.7}
+.an-sec{margin-top:12px}
+.an-sec-title{font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.an-sec-title .cnt{font-size:.7rem;color:var(--muted);background:rgba(255,255,255,.05);padding:1px 7px;border-radius:8px}
+.an-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03);font-size:.8rem}
+.an-row:last-child{border-bottom:none}
+.an-row-main{min-width:0;flex:1}
+.an-row-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.an-row-name{font-weight:600;font-size:.84rem}
+.an-row-sub{font-size:.7rem;color:var(--muted)}
+.an-row-sub b{color:var(--green)}
+.an-row-sub b.dn{color:var(--red)}
+.hold-tag,.hedge-tag{display:inline-block;padding:1px 6px;border-radius:5px;font-size:.64rem;font-weight:600;line-height:1.5}
+.hold-tag{background:rgba(99,102,241,.2);color:#c7d2fe}
+.hedge-tag{background:rgba(234,179,8,.18);color:var(--yellow)}
+.an-row-desc{color:var(--muted);font-size:.74rem;margin-top:2px;line-height:1.6}
+.an-note{font-size:.7rem;color:var(--muted);margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.05)}
 </style></head>
 <body>
 <div class="container">
@@ -122,6 +160,16 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 <div class="source-bar">
 <span style="font-size:.73rem;color:var(--muted)">1Y低/高为近一年高低 · 0.25/0.382/0.5/0.618/0.75为斐波那契网格线 · 区域1-6由低到高 · 1-5区各2份、6区不操作</span>
 <span class="result-count" id="rc">--</span>
+</div>
+
+<div class="analysis-panel" id="anPanel">
+<div class="an-head">
+<span class="an-title">📊 行情解读</span>
+<span class="an-meta" id="anMeta">--</span>
+<button class="an-btn" onclick="AN.load(true)">🔄 刷新解读</button>
+<button class="an-btn pri" id="btnANP" onclick="AN.push()">📤 推送微信</button>
+</div>
+<div class="an-body" id="anBody"><div class="an-loading">解读加载中…</div></div>
 </div>
 
 <div class="grid-view active" id="gv"></div>
@@ -198,9 +246,11 @@ var D={
 
   _detectApi(){
     var a = localStorage.getItem('etf_api')||'';
+    // 旧默认端口 8080 与 stock-screener 冲突（会拉到股票数据），迁移到 8081
+    if(a==='http://localhost:8080'||a==='http://127.0.0.1:8080') a='';
     if(!a && window.location.hostname && window.location.hostname!=='localhost' && window.location.hostname!=='127.0.0.1')
       a = window.location.origin;
-    if(!a) a = 'http://localhost:8080';
+    if(!a) a = 'http://localhost:8081';
     localStorage.setItem('etf_api',a);
     return a;
   },
@@ -547,6 +597,7 @@ async function U(force, mode){
     }
     if(D._loaded){
       toast('✅ Loaded '+D._etfs.length+' ETFs ('+(D._mode==='full'?'Full':'Quick')+')','ok');
+      if(typeof AN!=='undefined') AN.load(true);
     }
   }catch(e){
     toast('❌ Refresh failed: '+e.message,'err');
@@ -606,11 +657,108 @@ function toast(msg,type){
   t._tid=setTimeout(function(){t.classList.remove('show')},3000);
 }
 
+// ════════════════════ 行情解读 Analysis ════════════════════
+var AN={
+  _loaded:false,
+  ZCOLORS:{1:'#22c55e',2:'#4ade80',3:'#eab308',4:'#fb923c',5:'#ef4444',6:'#9333ea'},
+  GROUPS:[
+    {key:'buy',title:'接近买入点（低估/偏低）'},
+    {key:'hedge',title:'对冲仓状态'},
+    {key:'holding',title:'持仓ETF状态'},
+    {key:'mover',title:'今日异动'},
+    {key:'warning',title:'风险警示'}
+  ],
+  fmt:function(v,d){return (v==null||isNaN(v))?'--':(+v).toFixed((d==null?2:d));},
+  chip:function(label,val,cls){return '<span class="an-chip">'+label+'<b class="'+((cls||''))+'">'+val+'</b></span>';},
+  load:function(force){
+    if(AN._loaded&&!force)return;
+    var el=document.getElementById('anBody');
+    if(el)el.innerHTML='<div class="an-loading">解读加载中…</div>';
+    fetch(D._detectApi()+'/api/analysis',{signal:AbortSignal.timeout(20000)})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(j&&j.ok&&j.analysis){AN._loaded=true;AN.render(j.analysis);}
+        else{AN.renderFallback();}
+      })
+      .catch(function(){AN.renderFallback();});
+  },
+  render:function(a){
+    var el=document.getElementById('anBody');
+    document.getElementById('anMeta').textContent='生成于 '+a.generated_at;
+    var o=a.overview,h='';
+    h+='<div class="an-chips">';
+    h+=AN.chip('跟踪ETF',o.total+'','accent');
+    h+=AN.chip('攻击/对冲',o.attack+' / '+o.hedge,'');
+    if(o.holdings>0)h+=AN.chip('持仓',o.holdings+'','');
+    h+=AN.chip('低估区(1-2区)占比',AN.fmt(o.zone_buy_pct,1)+'%','');
+    if(o.avg_chg!=null)h+=AN.chip('今日均涨',(o.avg_chg>0?'+':'')+AN.fmt(o.avg_chg)+'%',o.avg_chg>=0?'up':'dn');
+    if(o.avg_ret_20!=null)h+=AN.chip('近20日均涨',(o.avg_ret_20>0?'+':'')+AN.fmt(o.avg_ret_20)+'%',o.avg_ret_20>=0?'up':'dn');
+    if(o.avg_corr!=null)h+=AN.chip('对冲相关',AN.fmt(o.avg_corr),o.avg_corr<0.1?'up':(o.avg_corr<0.4?'':'dn'));
+    h+=AN.chip('整体',o.direction||'--',o.direction==='整体偏强'?'up':(o.direction==='整体偏弱'?'dn':''));
+    h+='</div>';
+    h+='<div class="zone-bar">';
+    for(var z=1;z<=6;z++){var c=o.zone_dist[String(z)]||0,w=o.total?Math.round(c/o.total*100):0;h+='<i style="width:'+w+'%;background:'+AN.ZCOLORS[z]+'"></i>';}
+    h+='</div><div class="zone-leg">';
+    for(var z=1;z<=6;z++){h+='<span><b style="color:'+AN.ZCOLORS[z]+'">'+z+'区</b> '+AN.fmt(o.zone_dist[String(z)]||0,0)+'只</span>';}
+    h+='</div>';
+    h+='<div class="an-summary">'+esc(o.summary)+'</div>';
+    var hl=a.highlights||[];
+    for(var g=0;g<AN.GROUPS.length;g++){
+      var grp=AN.GROUPS[g];
+      var items=hl.filter(function(x){return x.group===grp.key;});
+      if(!items.length)continue;
+      h+='<div class="an-sec"><div class="an-sec-title">'+grp.title+'<span class="cnt">('+items.length+')</span></div>';
+      for(var i=0;i<items.length;i++){
+        var x=items[i],zp=x.zone?('<span class="zone-pill z'+x.zone+'">'+x.zone+'区</span>'):'';
+        var tag=(x.is_holding?'<span class="hold-tag">持仓</span>':'')+(x.is_hedge?'<span class="hedge-tag">对冲</span>':'');
+        h+='<div class="an-row"><div class="an-row-main"><div class="an-row-top"><span class="an-row-name">'+esc(x.name)+'</span>'+tag+
+          '<span class="an-row-sub">'+esc(x.code)+' · '+AN.fmt(x.price,3)+'</span>'+zp+
+          (x.change_pct!=null?'<span class="an-row-sub">今日 <b class="'+(x.change_pct>=0?'':'dn')+'">'+(x.change_pct>0?'+':'')+AN.fmt(x.change_pct)+'%</b></span>':'')+
+          (x.ret_20!=null?'<span class="an-row-sub">近20日 <b class="'+(x.ret_20>=0?'':'dn')+'">'+(x.ret_20>0?'+':'')+AN.fmt(x.ret_20)+'%</b></span>':'')+
+          '</div><div class="an-row-desc">'+esc(x.description)+'</div></div></div>';
+      }
+      h+='</div>';
+    }
+    h+='<div class="an-note">数据来源：akshare + baostock ｜ 仅供参考，不构成投资建议。点「推送微信」可把本解读推送到手机。</div>';
+    el.innerHTML=h;
+  },
+  renderFallback:function(){
+    var el=document.getElementById('anBody');
+    document.getElementById('anMeta').textContent='--';
+    if(!D._etfs||!D._etfs.length){el.innerHTML='<div class="an-loading">暂无数据，无法生成解读</div>';return;}
+    var s=D._etfs;
+    var dist={1:0,2:0,3:0,4:0,5:0,6:0};
+    s.forEach(function(x){if(x.grid_zone>=1&&x.grid_zone<=6)dist[x.grid_zone]++;});
+    var bc=dist[1]+dist[2];
+    var h='<div class="an-chips">';
+    h+=AN.chip('跟踪ETF',s.length+'','accent');
+    h+=AN.chip('低估区(1-2区)占比',AN.fmt(s.length?bc/s.length*100:0,1)+'%','');
+    h+='</div><div class="zone-bar">';
+    for(var z=1;z<=6;z++){var w=s.length?Math.round(dist[z]/s.length*100):0;h+='<i style="width:'+w+'%;background:'+AN.ZCOLORS[z]+'"></i>';}
+    h+='</div>';
+    h+='<div class="an-note">当前仅显示基础统计（接口不可用）。完整解读（整体判断、重点分组、趋势描述）需通过服务器访问。</div>';
+    el.innerHTML=h;
+  },
+  push:function(){
+    var btn=document.getElementById('btnANP'),base=D._detectApi();
+    btn.disabled=true;btn.textContent='推送中…';
+    fetch(base+'/api/pushplus_analysis',{method:'POST',signal:AbortSignal.timeout(30000)})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(j&&j.ok){toast('✅ 解读已推送微信','ok');}
+        else{toast('❌ '+(j&&(j.error||j.message)||'推送失败'),'err');}
+      })
+      .catch(function(e){toast('❌ 推送失败: '+e.message,'err');})
+      .then(function(){btn.disabled=false;btn.textContent='📤 推送微信';});
+  }
+};
+
 // ════════════════════  Init  ════════════════════
 (function init(){
   var _b=localStorage.getItem('etf_budget');
   if(_b!=null) document.getElementById('budget').value=_b;
   D.load(false, 'quick');
+  AN.load(false);
   var base = D._detectApi();
   console.log('ETF Screener ready, API:',base);
 })();

@@ -794,6 +794,366 @@ def build_push_html(etfs) -> str:
     )
 
 
+# ════════════════════ 行情解读 Analysis ════════════════════
+
+# 用户持仓 ETF（对应 HANDOFF.md 持仓清单，可自行增删）
+HOLDINGS = ['159928', '510300', '159741', '588780', '515880']
+# 对冲仓 ETF（黄金 / 十年国债 / 红利低波）
+HEDGE_ETFS = ['518680', '511260', '512890']
+
+ZONE_LABELS = {
+    1: '低估·重仓买入', 2: '偏低·加仓', 3: '偏低·加仓',
+    4: '偏高·持有/观望', 5: '偏高·减仓', 6: '不操作',
+}
+
+
+def compute_trend_stats(closes):
+    """Given ~260 daily closes (前复权), compute trend indicators (ret_5/ret_20/MA20/MA60/trend).
+    Returns a dict, or None when data is missing/insufficient."""
+    if not isinstance(closes, (list, tuple, pd.Series)):
+        return None
+    arr = np.asarray([float(c) for c in closes if c is not None], dtype=float)
+    arr = arr[~np.isnan(arr)]
+    n = len(arr)
+    if n < 20:
+        return None
+    price = float(arr[-1])
+
+    def pct(d):
+        if n <= d or arr[-1 - d] <= 0:
+            return None
+        return round((price / float(arr[-1 - d]) - 1) * 100, 2)
+
+    def ma(w):
+        if n < w:
+            return None
+        return float(arr[-w:].mean())
+
+    ma20, ma60 = ma(20), ma(60)
+    trend = '震荡'
+    if ma20 is not None and ma60 is not None:
+        if price > ma20 > ma60:
+            trend = '上升'
+        elif price < ma20 < ma60:
+            trend = '下降'
+    return {
+        'ret_5': pct(5),
+        'ret_20': pct(20),
+        'ma20': round(ma20, 2) if ma20 is not None else None,
+        'ma60': round(ma60, 2) if ma60 is not None else None,
+        'above_ma20': bool(ma20 is not None and price > ma20),
+        'above_ma60': bool(ma60 is not None and price > ma60),
+        'trend': trend,
+    }
+
+
+def _zone_int(e):
+    """Safe int conversion of grid_zone (None / NaN → None)."""
+    z = e.get('grid_zone')
+    try:
+        z = float(z)
+        return int(z) if pd.notna(z) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _zone_bounds(e):
+    """Return (lo, hi) price range of current grid zone, or None."""
+    z = _zone_int(e)
+    if z is None:
+        return None
+    m = {
+        1: ('min_price_1y', 'grid_25'),
+        2: ('grid_25', 'grid_382'),
+        3: ('grid_382', 'grid_50'),
+        4: ('grid_50', 'grid_618'),
+        5: ('grid_618', 'grid_75'),
+        6: ('grid_75', 'max_price_1y'),
+    }.get(z)
+    if not m:
+        return None
+    lo, hi = e.get(m[0]), e.get(m[1])
+    if lo is None or hi is None:
+        return None
+    lo, hi = float(lo), float(hi)
+    if lo <= 0 or hi <= lo:
+        return None
+    return lo, hi
+
+
+def _zone_position(e):
+    """Position of current price within its grid zone: 下沿 / 中部 / 上沿, or ''."""
+    b = _zone_bounds(e)
+    if not b:
+        return ''
+    lo, hi = b
+    pos = (safe_float(e.get('latest_price'), 0) - lo) / (hi - lo)
+    if pos <= 0.33:
+        return '下沿'
+    if pos >= 0.66:
+        return '上沿'
+    return '中部'
+
+
+def _trend_phrase(t):
+    """Short natural-language trend phrase from compute_trend_stats result."""
+    if not t or not t.get('trend'):
+        return ''
+    r20 = t.get('ret_20')
+    rs = '--' if r20 is None else f"{r20:+.2f}%"
+    if t['trend'] == '上升':
+        return f"趋势偏多（近20日{rs}）"
+    if t['trend'] == '下降':
+        return f"趋势偏弱（近20日{rs}）"
+    return f"趋势震荡（近20日{rs}）"
+
+
+def _fmt_signed(v):
+    return '--' if v is None else f"{v:+.2f}%"
+
+
+def build_analysis(etfs):
+    """Compute 行情解读: overall overview + highlight groups + markdown report.
+    Returns a JSON-serializable dict, or None when data is empty."""
+    if not etfs:
+        return None
+
+    rows = []
+    for e in etfs:
+        row = dict(e)
+        closes = row.get('price_history')
+        row['_trend'] = compute_trend_stats(closes) if closes else None
+        rows.append(row)
+
+    n = len(rows)
+    attack = [r for r in rows if r['code'] not in HEDGE_ETFS]
+    hedge = [r for r in rows if r['code'] in HEDGE_ETFS]
+    holding_sel = [r for r in rows if r['code'] in HOLDINGS]
+
+    # ── Overview stats ──
+    zone_dist = {str(z): 0 for z in range(1, 7)}
+    for r in rows:
+        z = _zone_int(r)
+        if z is not None and 1 <= z <= 6:
+            zone_dist[str(z)] += 1
+    buy_count = zone_dist['1'] + zone_dist['2']
+    zone_buy_pct = round(buy_count / n * 100, 1) if n else 0.0
+
+    lows = [safe_float(r.get('pct_from_low'), 0) for r in rows if r.get('pct_from_low') is not None]
+    avg_pct_from_low = round(sum(lows) / len(lows), 1) if lows else None
+
+    chgs = [safe_float(r.get('change_pct'), 0) for r in rows if r.get('change_pct') is not None]
+    avg_chg = round(sum(chgs) / len(chgs), 2) if chgs else None
+
+    ret5s = [r['_trend']['ret_5'] for r in rows if r['_trend'] and r['_trend'].get('ret_5') is not None]
+    ret20s = [r['_trend']['ret_20'] for r in rows if r['_trend'] and r['_trend'].get('ret_20') is not None]
+    above20 = sum(1 for r in rows if r['_trend'] and r['_trend'].get('above_ma20'))
+    above60 = sum(1 for r in rows if r['_trend'] and r['_trend'].get('above_ma60'))
+    with_trend = sum(1 for r in rows if r['_trend'])
+    avg_ret_5 = round(sum(ret5s) / len(ret5s), 2) if ret5s else None
+    avg_ret_20 = round(sum(ret20s) / len(ret20s), 2) if ret20s else None
+    above_ma20_pct = round(above20 / with_trend * 100, 0) if with_trend else None
+    above_ma60_pct = round(above60 / with_trend * 100, 0) if with_trend else None
+
+    corrs = [safe_float(r.get('corr_300'), 0) for r in hedge if r.get('corr_300') is not None]
+    avg_corr = round(sum(corrs) / len(corrs), 2) if corrs else None
+
+    direction = '震荡分化'
+    if avg_ret_20 is not None and above_ma20_pct is not None:
+        if avg_ret_20 > 2 and above_ma20_pct > 60:
+            direction = '整体偏强'
+        elif avg_ret_20 < -2 or above_ma20_pct < 40:
+            direction = '整体偏弱'
+
+    if avg_corr is None:
+        hedge_note = ''
+    elif avg_corr < 0.1:
+        hedge_note = f"，对冲仓与沪深300平均相关{avg_corr:+.2f}，对冲效果好"
+    elif avg_corr < 0.4:
+        hedge_note = f"，对冲仓平均相关{avg_corr:+.2f}，对冲效果一般"
+    else:
+        hedge_note = f"，对冲仓平均相关{avg_corr:+.2f}，注意对冲有效性"
+
+    summary = f"共跟踪 {n} 只ETF（攻击 {len(attack)} + 对冲 {len(hedge)}）"
+    if holding_sel:
+        summary += f"，持仓 {len(holding_sel)} 只"
+    summary += f"，低估区（1-2区）占 {zone_buy_pct}%"
+    if avg_pct_from_low is not None:
+        summary += f"，距1年低点平均 +{avg_pct_from_low}%"
+    summary += f"，整体{direction}"
+    if avg_ret_20 is not None:
+        summary += f"（近20日平均{avg_ret_20:+.2f}%）"
+    summary += hedge_note + "。"
+    if zone_buy_pct >= 30:
+        summary += "仍有三成以上ETF处于低估买入区，可逢低分批布局。"
+    elif zone_buy_pct >= 15:
+        summary += "部分ETF仍处低估区，可择优关注。"
+    else:
+        summary += "多数ETF已脱离低估区，追涨需谨慎。"
+
+    # ── 重点 ETF 挑选 ──
+    def make_h(r, group):
+        t = r.get('_trend') or {}
+        corr = r.get('corr_300')
+        return {
+            'code': r.get('code', ''),
+            'name': r.get('name', ''),
+            'price': round(safe_float(r.get('latest_price'), 0), 4),
+            'zone': _zone_int(r),
+            'is_holding': bool(r.get('code') in HOLDINGS),
+            'is_hedge': bool(r.get('code') in HEDGE_ETFS),
+            'group': group,
+            'trend': t.get('trend'),
+            'ret_5': t.get('ret_5'),
+            'ret_20': t.get('ret_20'),
+            'change_pct': safe_float(r.get('change_pct'), 0),
+            'corr_300': round(corr, 3) if corr is not None else None,
+            'discount_rate': safe_float(r.get('discount_rate'), 0),
+            'pe_percentile': r.get('pe_percentile'),
+            'pct_from_low': round(safe_float(r.get('pct_from_low'), 0), 1) if r.get('pct_from_low') is not None else None,
+            'description': '',
+        }
+
+    def zone_pos_val(r):
+        b = _zone_bounds(r)
+        if not b:
+            return 99.0
+        lo, hi = b
+        return (safe_float(r.get('latest_price'), 0) - lo) / (hi - lo)
+
+    buy_sel = [r for r in rows if _zone_int(r) in (1, 2)]
+    buy_sel.sort(key=lambda r: (int(r['grid_zone']), zone_pos_val(r)))
+    buy_sel = buy_sel[:5]
+
+    movers = [r for r in rows if r.get('change_pct') is not None]
+    movers.sort(key=lambda r: safe_float(r.get('change_pct'), 0), reverse=True)
+    mover_sel = (movers[:3] + (movers[-3:] if len(movers) >= 3 else [])) if movers else []
+
+    warnings = []
+    for r in rows:
+        z = _zone_int(r)
+        disc = safe_float(r.get('discount_rate'), 0)
+        pe = r.get('pe_percentile')
+        if z == 6:
+            warnings.append((r, "处于6区（高位/不操作），已接近1年高点"))
+        if disc > 0.3:
+            warnings.append((r, f"场内溢价 {disc:+.2f}%，注意估值泡沫"))
+        if pe is not None and safe_float(pe, 0) > 80:
+            warnings.append((r, f"PE分位 {safe_float(pe, 0):.0f}%，估值偏高"))
+
+    pairs = []
+    for r in buy_sel:
+        pairs.append((make_h(r, 'buy'), r))
+    for r in hedge:
+        pairs.append((make_h(r, 'hedge'), r))
+    for r in holding_sel:
+        pairs.append((make_h(r, 'holding'), r))
+    for r in mover_sel:
+        pairs.append((make_h(r, 'mover'), r))
+    for r, reason in warnings:
+        h = make_h(r, 'warning')
+        h['description'] = reason
+        pairs.append((h, r))
+
+    highlights = []
+    for h, r in pairs:
+        t = r.get('_trend') or {}
+        z = h['zone']
+        zlbl = ZONE_LABELS.get(z, '')
+        pl = '--' if h['pct_from_low'] is None else f"+{h['pct_from_low']}%"
+        if h['group'] == 'buy':
+            pos = _zone_position(r)
+            h['description'] = (f"处于{z}区（{zlbl}）{('·' + pos) if pos else ''}，"
+                                f"距1年低点{pl}。{_trend_phrase(t)}")
+        elif h['group'] == 'hedge':
+            corr_s = '--' if h['corr_300'] is None else f"{h['corr_300']:+.2f}"
+            h['description'] = (f"对冲ETF：处于{z}区（{zlbl}），与沪深300相关性 {corr_s}。"
+                                f"{_trend_phrase(t)}")
+        elif h['group'] == 'holding':
+            h['description'] = f"持仓ETF：处于{z}区（{zlbl}），距1年低点{pl}。{_trend_phrase(t)}"
+        elif h['group'] == 'mover':
+            h['description'] = f"今日{_fmt_signed(h['change_pct'])}，{_trend_phrase(t)}"
+        # warning 组 description 已在上方赋值，跳过
+        highlights.append(h)
+
+    analysis = {
+        'generated_at': bj_now().strftime('%Y-%m-%d %H:%M'),
+        'overview': {
+            'total': n,
+            'attack': len(attack),
+            'hedge': len(hedge),
+            'holdings': len(holding_sel),
+            'zone_dist': zone_dist,
+            'zone_buy_pct': zone_buy_pct,
+            'avg_pct_from_low': avg_pct_from_low,
+            'avg_chg': avg_chg,
+            'avg_ret_5': avg_ret_5,
+            'avg_ret_20': avg_ret_20,
+            'above_ma20_pct': above_ma20_pct,
+            'above_ma60_pct': above_ma60_pct,
+            'avg_corr': avg_corr,
+            'direction': direction,
+            'summary': summary,
+        },
+        'highlights': highlights,
+    }
+    analysis['report'] = build_report_markdown(analysis)
+    return analysis
+
+
+def build_report_markdown(a):
+    """Assemble the PushPlus Markdown report from an analysis dict."""
+    o = a['overview']
+    L = []
+    date_str = a.get('generated_at', '')[:10]
+    L.append(f"# ETF 行情解读 {date_str}")
+    L.append('')
+    L.append('## 一、整体概览')
+    L.append(f"- 跟踪ETF：**{o['total']}** 只（攻击 {o['attack']} + 对冲 {o['hedge']}"
+             f"{'，持仓 ' + str(o['holdings']) + ' 只' if o.get('holdings') else ''}）")
+    dist = ' / '.join(f"{k}区 {v}只" for k, v in sorted(o['zone_dist'].items()))
+    L.append(f"- 网格区间：{dist}；**低估区（1-2区）占比 {o['zone_buy_pct']}%**")
+    if o.get('avg_pct_from_low') is not None:
+        L.append(f"- 距1年低点平均 **+{o['avg_pct_from_low']}%**")
+    if o.get('avg_chg') is not None:
+        L.append(f"- 今日平均涨跌 **{o['avg_chg']:+.2f}%**")
+    if o.get('avg_ret_5') is not None:
+        L.append(f"- 近5日平均 {o['avg_ret_5']:+.2f}%，近20日平均 {o['avg_ret_20']:+.2f}%；"
+                 f"站上20日均线 {o['above_ma20_pct']:.0f}%，站上60日均线 {o['above_ma60_pct']:.0f}%")
+    if o.get('avg_corr') is not None:
+        L.append(f"- 对冲仓与沪深300平均相关性 **{o['avg_corr']:+.2f}**")
+    L.append('')
+    L.append(f"**整体判断**：{o['summary']}")
+    L.append('')
+
+    group_titles = {
+        'buy': '接近买入点（低估/偏低，可关注加仓）',
+        'hedge': '对冲仓状态',
+        'holding': '持仓ETF状态',
+        'mover': '今日异动',
+        'warning': '风险警示',
+    }
+    numerals = ['二', '三', '四', '五', '六', '七']
+    idx = 0
+    for g in ('buy', 'hedge', 'holding', 'mover', 'warning'):
+        items = [h for h in a['highlights'] if h['group'] == g]
+        if not items:
+            continue
+        L.append(f"## {numerals[idx]}、{group_titles[g]}（{len(items)}只）")
+        if g == 'mover':
+            items = sorted(items, key=lambda h: h['change_pct'] if h['change_pct'] is not None else -999, reverse=True)
+        for i, h in enumerate(items, 1):
+            zs = f"{h['zone']}区" if h['zone'] else '--'
+            L.append(f"{i}. **{h['name']}**（{h['code']}）｜现价 {h['price']}｜{zs}")
+            L.append(f"   {h['description']}")
+        L.append('')
+        idx += 1
+
+    L.append('---')
+    L.append('数据来源：akshare + baostock ｜ 仅供参考，不构成投资建议。')
+    return '\n'.join(L)
+
+
 # ── HTTP Handler ─────────────────────────────────────────────────
 
 class ETFHandler(SimpleHTTPRequestHandler):
@@ -881,6 +1241,11 @@ class ETFHandler(SimpleHTTPRequestHandler):
                 self._json_response({'status': 'error', 'msg': f'PushPlus error: {ex}'})
             return
 
+        # ── API: 行情解读 Analysis ───────────────────────────
+        if path == '/api/analysis':
+            self._api_analysis()
+            return
+
         # ── API: Health check ─────────────────────────────────
         if path == '/api/health':
             self._json_response({'status': 'ok', 'time': bj_now().isoformat()})
@@ -895,6 +1260,57 @@ class ETFHandler(SimpleHTTPRequestHandler):
             return
 
         return super().do_GET()
+
+    def _load_analysis_etfs(self):
+        """Load ETF data for analysis: cached data (quick), no refresh."""
+        return get_data(force_refresh=False, full=False) or []
+
+    def _api_analysis(self):
+        """GET /api/analysis — 行情解读（整体概览 + 重点分组 + markdown 报告）"""
+        try:
+            etfs = self._load_analysis_etfs()
+            if not etfs:
+                self._json_response({'ok': False, 'error': 'No data available for analysis'})
+                return
+            analysis = build_analysis(etfs)
+            if not analysis:
+                self._json_response({'ok': False, 'error': 'Analysis produced no result'})
+                return
+            self._json_response({'ok': True, 'analysis': analysis})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._json_response({'ok': False, 'error': f'Analysis error: {e}'})
+
+    def _api_pushplus_analysis(self):
+        """POST /api/pushplus_analysis — 推送行情解读到微信（markdown）"""
+        token = os.getenv('PUSHPLUS_TOKEN', '')
+        if not token:
+            self._json_response({'ok': False, 'error': 'PUSHPLUS_TOKEN not configured'})
+            return
+        try:
+            etfs = self._load_analysis_etfs()
+            if not etfs:
+                self._json_response({'ok': False, 'error': 'No data available to push'})
+                return
+            analysis = build_analysis(etfs)
+            report = analysis['report']
+            title = f"ETF 行情解读 {analysis['generated_at'][:10]}"
+            ok = send_pushplus(token, title, report, 'markdown')
+            print(f'[{bj_now():%H:%M:%S}] PushPlus analysis: {"OK" if ok else "FAIL"} (size={len(report)} chars)')
+            self._json_response({'ok': ok, 'message': '解读已推送微信' if ok else 'PushPlus 发送失败'})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._json_response({'ok': False, 'error': f'PushPlus analysis error: {e}'})
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == '/api/pushplus_analysis':
+            self._api_pushplus_analysis()
+            return
+        self._json_response({'status': 'error', 'msg': 'Not found'})
 
     def _json_response(self, data):
         body = json.dumps(data, ensure_ascii=False, default=str).encode('utf-8')
@@ -963,7 +1379,7 @@ class ETFHandler(SimpleHTTPRequestHandler):
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=int(os.getenv('PORT', '8080')))
+    parser.add_argument('--port', type=int, default=int(os.getenv('PORT', '8081')))
     parser.add_argument('--prefetch', action='store_true', default=True,
                         help='Pre-fetch data on startup (default: True)')
     args = parser.parse_args()
