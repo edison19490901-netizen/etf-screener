@@ -41,10 +41,10 @@ Default mode is **Quick**. Full mode runs on explicit button click or daily cron
 
 **前复权 K-line**: baostock ignores `adjustflag` for ETFs (returns 不复权), so split jumps corrupt 1Y low/high. The K-line is instead derived from 累计净值 (cumulative NAV, akshare `fund_open_fund_info_em`) rescaled to the current price — smooth across splits/dividends. Chart shows full 1Y (260 trading days) so 1Y min/max and grid lines intersect the curve.
 
-## 18 Tracked ETFs
+## 23 Tracked ETFs
 
-### Attack basket (15)
-516080, 159061, 159611, 159692, 516120, 516770, 515550, 159562, 588080, 159741, 159928, 510300, 515880, 588780, 159796(电池ETF汇添富)
+### Attack basket (20)
+516080, 159061, 159611, 159692, 516120, 516770, 515550, 159562, 588080, 159741, 159928, 510300, 515880, 588780, 159796(电池ETF汇添富), 510050(上证50), 159367(创业板50), 159150(深证50), 159212(深100), 159227(航空航天)
 
 ### Hedge basket (added 3)
 - **518680** 黄金ETF华夏 — fee 0.20%, corr +0.25 vs CSI300
@@ -99,21 +99,39 @@ Per-ETF grid between **1Y low** and **1Y high**, 5 Fibonacci lines (0.25 / 0.382
 - 工具栏「网格预算/只(元)」输入框（存 localStorage `etf_budget`）：1-5区各2份、6区不操作；表格「建议投入」列显示 1-6 区金额（6区=不操作），当前区域高亮。
 - Card 布局：头部（名称+代码 左 / 最新价 右，下方实线分隔）；正文左列 1Y最低/0.25/0.382/0.5，右列 0.618/0.75/1Y最高，网格区域跨行右对齐。
 
+## 行情解读 Analysis
+
+dashboard 顶部工具栏下方的「📊 行情解读」面板，随数据刷新自动更新；可手动「刷新解读」「推送微信」。
+
+- **数据来源**：读现有缓存（`get_data()`），不动双模式刷新逻辑。
+- **整体概览**：跟踪数（攻击/对冲/持仓）、网格区分布 + 低估区(1-2区)占比、距1年低点均值、今日均涨、近5/20日均动量、站上MA20/MA60比例、对冲仓平均相关性 → 整体方向（整体偏强/震荡分化/整体偏弱）+ 自然语言总结。**不含**折溢价/PE 概览。
+- **重点分组（5组）**：
+  - `buy` 接近买入点（网格1-2区，附区内下沿/中部/上沿，top5）
+  - `hedge` 对冲仓状态（黄金/国债/红利低波，现价区间 + corr_300）
+  - `holding` 持仓ETF状态（取 `HOLDINGS` 常量）
+  - `mover` 今日异动（涨跌幅 top/bottom 各3）
+  - `warning` 风险警示（6区 / 场内溢价>0.3% / PE分位>80%）
+- **HOLDINGS**（`app.py:800`）：默认 `['159928','510300','159741','588780','515880']`，对应下方持仓清单中的 ETF；改持仓时同步更新此常量。
+- **推送**：`POST /api/pushplus_analysis` 复用 `send_pushplus` 推 markdown 报告（标题「ETF 行情解读 \<日期\>」）。
+- **前端**：`etf_dashboard.html` 的 `.analysis-panel` + `AN` JS 对象（load/render/renderFallback/push），接口不可用时降级为基础统计。
+
 ## Key Code Locations
 
 | File | What |
 |------|------|
-| `app.py:49-71` | ETF_LIST + BENCHMARK_ETF |
-| `app.py:74-88` | ETF_NAMES dict |
-| `app.py:92-104` | safe_float/safe_int helpers |
-| `app.py:107-154` | calc_bollinger() (20-day) + calc_grid() (5线→6区) |
-| `app.py:156-384` | fetch_all_data() (Full refresh) |
-| `app.py:386-411` | calc_correlations() (60-day vs 510300) |
-| `app.py:459-556` | fetch_nav_series() + nav_to_adj_closes() + compute_from_closes() — 前复权 K线/1Y/网格/BB |
-| `app.py:558-644` | fetch_prices_quick() (Quick refresh) |
-| `app.py:687-737` | get_data() cache logic |
-| `app.py:739-954` | send_pushplus() + build_push_html() + HTTP API handlers |
-| `etf_dashboard.html` | Full frontend |
+| `app.py:49-76` | ETF_LIST + BENCHMARK_ETF |
+| `app.py:79-84` | ETF_NAMES dict |
+| `app.py:99-112` | safe_float/safe_int helpers |
+| `app.py:114-160` | calc_bollinger() (20-day) + calc_grid() (5线→6区) |
+| `app.py:163-391` | fetch_all_data() (Full refresh) |
+| `app.py:393-464` | calc_correlations() (60-day vs 510300) |
+| `app.py:466-561` | fetch_nav_series() + nav_to_adj_closes() + compute_from_closes() — 前复权 K线/1Y/网格/BB |
+| `app.py:565-650` | fetch_prices_quick() (Quick refresh) |
+| `app.py:694-741` | get_data() cache logic |
+| `app.py:746-794` | send_pushplus() + build_push_html() |
+| `app.py:800-1155` | 行情解读 Analysis：HOLDINGS/HEDGE_ETFS + compute_trend_stats() + build_analysis() + build_report_markdown() |
+| `app.py:1157-1377` | HTTP API handlers（/api/etf_data /api/refresh /api/export /api/analysis /api/pushplus_analysis） |
+| `etf_dashboard.html` | Full frontend（含 .analysis-panel + AN 行情解读面板） |
 
 ## Environment Variables
 
@@ -124,6 +142,7 @@ Per-ETF grid between **1Y low** and **1Y high**, 5 Fibonacci lines (0.25 / 0.382
 
 ## Troubleshooting
 
+- **ETF 面板显示股票/解读内容不对**: 本地端口撞车。stock-screener 默认占 8080，etf-screener 本地默认已改 **8081**；dashboard `_detectApi()` 会自动迁移旧的 `localhost:8080` 缓存。仍异常时手动清浏览器 localStorage 的 `etf_api`。
 - **GitHub push fails (HTTPS)**: GFW blocks 443. Use SSH (`git@github.com:...`)
 - **NaN ValueError on Render**: Fixed with safe_float/safe_int in `app.py:77-96`
 - **PE shows "--"**: Only 510300+515550 have PE data (12-index limit in akshare)
