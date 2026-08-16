@@ -98,7 +98,8 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
 .zone-leg{display:flex;gap:10px;flex-wrap:wrap;font-size:.7rem;color:var(--muted);margin-bottom:12px}
 .zone-leg b{font-weight:700}
 .an-summary{background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:10px;padding:10px 12px;font-size:.82rem;line-height:1.7}
-.an-sec{margin-top:12px}
+.an-secs{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin-top:12px}
+.an-sec{margin-top:0}
 .an-sec-title{font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:4px;display:flex;align-items:center;gap:6px}
 .an-sec-title .cnt{font-size:.7rem;color:var(--muted);background:rgba(255,255,255,.05);padding:1px 7px;border-radius:8px}
 .an-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03);font-size:.8rem}
@@ -720,6 +721,7 @@ var AN={
     h+='</div>';
     h+='<div class="an-summary">'+esc(o.summary)+'</div>';
     var hl=a.highlights||[];
+    h+='<div class="an-secs">';
     for(var g=0;g<AN.GROUPS.length;g++){
       var grp=AN.GROUPS[g];
       var items=hl.filter(function(x){return x.group===grp.key;});
@@ -736,6 +738,7 @@ var AN={
       }
       h+='</div>';
     }
+    h+='</div>';
     h+='<div class="an-note">数据来源：akshare + baostock ｜ 仅供参考，不构成投资建议。点「推送微信」可把本解读推送到手机。</div>';
     el.innerHTML=h;
   },
