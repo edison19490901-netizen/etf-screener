@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: d049ee4a-be38-421b-96ea-6047203cb3fc
-  modified: 2026-08-10T02:59:32.538Z
+  modified: 2026-08-17T00:00:00.000Z
 ---
 
 # ETF Screener — Project Handoff
@@ -114,6 +114,7 @@ dashboard 顶部工具栏下方的「📊 行情解读」面板，随数据刷�
 - **HOLDINGS**（`app.py:800`）：默认 `['159928','510300','159741','588780','515880']`，对应下方持仓清单中的 ETF；改持仓时同步更新此常量。
 - **推送**：`POST /api/pushplus_analysis` 复用 `send_pushplus` 推 markdown 报告（标题「ETF 行情解读 \<日期\>」）。
 - **前端**：`etf_dashboard.html` 的 `.analysis-panel` + `AN` JS 对象（load/render/renderFallback/push），接口不可用时降级为基础统计。
+- **交互**：面板头部有「收起/展开」按钮（`AN.toggle()`），折叠状态存 localStorage `an_collapsed`，刷新/重开保持；`AN.init()` 启动时恢复。标题 `.an-title` 用 `flex:1 1 auto;white-space:nowrap`，防止手机上「行情解读」四字被压成竖排（flex:1 的 basis:0 会把弹性项压到 0 宽）。
 
 ## 密码保护 Auth
 
