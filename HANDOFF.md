@@ -41,10 +41,10 @@ Default mode is **Quick**. Full mode runs on explicit button click or daily cron
 
 **前复权 K-line**: baostock ignores `adjustflag` for ETFs (returns 不复权), so split jumps corrupt 1Y low/high. The K-line is instead derived from 累计净值 (cumulative NAV, akshare `fund_open_fund_info_em`) rescaled to the current price — smooth across splits/dividends. Chart shows full 1Y (260 trading days) so 1Y min/max and grid lines intersect the curve.
 
-## 23 Tracked ETFs
+## 24 Tracked ETFs
 
-### Attack basket (20)
-516080, 159061, 159611, 159692, 516120, 516770, 515550, 159562, 588080, 159741, 159928, 510300, 515880, 588780, 159796(电池ETF汇添富), 510050(上证50), 159367(创业板50), 159150(深证50), 159212(深100), 159227(航空航天)
+### Attack basket (21)
+516080, 159061, 159611, 159692, 516120, 516770, 515550, 159562, 588080, 159741, 159928, 510300, 515880, 588780, 159796(电池ETF汇添富), 510050(上证50), 159367(创业板50), 159150(深证50), 159212(深100), 159227(航空航天), 159030(粮食ETF华夏)
 
 ### Hedge basket (added 3)
 - **518680** 黄金ETF华夏 — fee 0.20%, corr +0.25 vs CSI300

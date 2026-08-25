@@ -68,6 +68,7 @@ ETF_LIST = [
     '159150',  # 深证50ETF易方达
     '159212',  # 深100ETF南方
     '159227',  # 航空航天ETF华夏
+    '159030',  # 粮食ETF华夏
     # 对冲仓 — 防御/避险
     '518680',  # 黄金ETF华夏（费率0.2% vs 华安0.6%）
     '511260',  # 十年国债ETF国泰
@@ -77,6 +78,7 @@ BENCHMARK_ETF = '510300'  # 对冲基准：沪深300
 
 # Fallback names for ETFs not covered by akshare spot data
 ETF_NAMES = {
+    '159030': '粮食ETF华夏',
     '159796': '电池ETF汇添富',
     '518680': '黄金ETF华夏',
     '511260': '十年国债ETF国泰',
