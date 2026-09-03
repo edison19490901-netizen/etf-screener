@@ -60,6 +60,7 @@ ETF_LIST = [
     '159741',  # 恒生科技ETF嘉实
     '159928',  # 消费ETF汇添富
     '510300',  # 沪深300ETF华泰柏瑞
+    '159338',  # 中证A500ETF国泰（宽基核心·中证A500，PE分位暂缺）
     '515880',  # 通信ETF国泰
     '588780',  # 科创芯片设计ETF国联安
     '159796',  # 电池ETF汇添富
@@ -78,6 +79,7 @@ BENCHMARK_ETF = '510300'  # 对冲基准：沪深300
 
 # Fallback names for ETFs not covered by akshare spot data
 ETF_NAMES = {
+    '159338': '中证A500ETF国泰',
     '159030': '粮食ETF华夏',
     '159796': '电池ETF汇添富',
     '518680': '黄金ETF华夏',
